@@ -17,7 +17,8 @@ import (
 
 const (
 	SplitViewThreshold = 100
-	WideViewThreshold  = 140 // Threshold to show extra columns
+	WideViewThreshold  = 140
+	UltraWideViewThreshold = 180
 )
 
 type focus int
@@ -140,7 +141,7 @@ func NewModel(issues []model.Issue) Model {
 	}
 
 	// Default delegate
-	delegate := IssueDelegate{ShowExtraCols: false}
+	delegate := IssueDelegate{Tier: TierCompact}
 	l := list.New(items, delegate, 0, 0)
 	l.Title = "Beads"
 	l.SetShowHelp(false)
@@ -245,26 +246,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.isSplitView = msg.Width > SplitViewThreshold
 		
-		// Adaptive Delegate
-		showExtra := msg.Width > WideViewThreshold
-		m.list.SetDelegate(IssueDelegate{ShowExtraCols: showExtra})
-
 		m.ready = true
 		
 		// Layout calculations
 		headerHeight := 1 // Status bar
 		availableHeight := msg.Height - headerHeight
 		
+		var listWidth int
+		
 		if m.isSplitView {
-			listWidth := int(float64(msg.Width) * 0.4)
+			listWidth = int(float64(msg.Width) * 0.4)
 			detailWidth := msg.Width - listWidth - 4 // margins
 			
 			m.list.SetSize(listWidth, availableHeight)
 			m.viewport = viewport.New(detailWidth, availableHeight-2) // -2 for border
 		} else {
+			listWidth = msg.Width
 			m.list.SetSize(msg.Width, availableHeight)
 			m.viewport = viewport.New(msg.Width, availableHeight-2)
 		}
+		
+		// Adaptive Delegate Tier based on List Width
+		var tier Tier
+		if listWidth > 120 {
+			tier = TierUltraWide
+		} else if listWidth > 90 {
+			tier = TierWide
+		} else if listWidth > 60 {
+			tier = TierNormal
+		} else {
+			tier = TierCompact
+		}
+		m.list.SetDelegate(IssueDelegate{Tier: tier})
 		
 		if m.isSplitView {
 			m.renderer, _ = glamour.NewTermRenderer(

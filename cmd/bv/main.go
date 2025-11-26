@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"beads_viewer/pkg/export"
 	"beads_viewer/pkg/loader"
 	"beads_viewer/pkg/ui"
 
@@ -14,6 +15,7 @@ import (
 func main() {
 	help := flag.Bool("help", false, "Show help")
 	version := flag.Bool("version", false, "Show version")
+	exportFile := flag.String("export-md", "", "Export issues to a Markdown file (e.g., report.md)")
 	flag.Parse()
 
 	if *help {
@@ -34,6 +36,16 @@ func main() {
 		fmt.Printf("Error loading beads: %v\n", err)
 		fmt.Println("Make sure you are in a project initialized with 'bd init'.")
 		os.Exit(1)
+	}
+
+	if *exportFile != "" {
+		fmt.Printf("Exporting to %s...\n", *exportFile)
+		if err := export.SaveMarkdownToFile(issues, *exportFile); err != nil {
+			fmt.Printf("Error exporting: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Done!")
+		os.Exit(0)
 	}
 
 	if len(issues) == 0 {

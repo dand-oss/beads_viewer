@@ -1,18 +1,18 @@
 # Beads Viewer (bv)
 
-A polished, high-performance TUI for managing and exploring [Beads](https://github.com/steveyegge/beads) issue trackers. Designed for developers who live in the terminal.
+A polished, high-performance TUI for managing and exploring [Beads](https://github.com/steveyegge/beads) issue trackers.
 
 ## Features
 
 ### 🖥️ Slick Dashboard
-*   **Adaptive Layout**: Automatically transitions from a compact list to a master-detail dashboard on wide screens (>100 cols).
-*   **Columnar List**: At-a-glance details including Type (🐛/✨), Priority (🔥/⚡), Status, Assignee, Age, and Comment counts.
-*   **Live Stats**: Always-visible counters for Open, Ready, Blocked, and Closed issues.
+*   **Adaptive Split-View**: Automatically transitions to a master-detail dashboard on wide screens (>100 cols).
+*   **Ultra-Wide Mode**: Shows extended metadata (Age, Updated At, Comments) on large displays (>180 cols).
+*   **Live Stats**: Persistent stats bar showing Open, Ready, Blocked, and Closed counts.
 
 ### 🎨 Rich Visualization
-*   **Markdown Rendering**: Beautiful rendering of issue descriptions and comments with syntax highlighting (via `glamour`).
-*   **Dracula Theme**: A vibrant, high-contrast color scheme optimized for long coding sessions.
-*   **Dependency Graph**: Visualizes blocking (⛔) and related (🔗) issues directly in the context of the work.
+*   **Markdown Rendering**: Beautiful rendering of issue content with syntax highlighting (via `glamour`).
+*   **Dracula Theme**: A vibrant, high-contrast color scheme.
+*   **Dependency Graph**: Visualizes blockers (⛔) and related (🔗) issues.
 
 ### ⚡ Workflow
 *   **Instant Filtering**: 
@@ -20,10 +20,11 @@ A polished, high-performance TUI for managing and exploring [Beads](https://gith
     *   `r`: **Ready** work (Open & Unblocked)
     *   `c`: **Closed**
     *   `a`: **All**
-*   **Keyboard Driven**: `vim` style navigation (`j`/`k`), Tab focus switching, and rapid filtering.
+*   **Search**: Use the list's fuzzy search (type to filter).
+*   **Export**: Generate comprehensive Markdown reports with `--export-md`.
 
 ### 🛠️ Robust & Reliable
-*   **Self-Updating**: Automatically checks for new releases and notifies you.
+*   **Self-Updating**: Automatically checks for new releases.
 *   **Resilient Loader**: Handles large or partially malformed JSONL databases gracefully.
 
 ## Installation
@@ -46,6 +47,11 @@ Navigate to any project initialized with `bd init` and run:
 bv
 ```
 
+To export a report:
+```bash
+bv --export-md report.md
+```
+
 ### Keybindings
 
 | Key | Context | Action |
@@ -53,10 +59,7 @@ bv
 | `Tab` | Split View | Switch focus between List and Details |
 | `j` / `k` | Global | Navigate list or scroll details |
 | `Enter` | List | Open details (Mobile) or Focus details (Split) |
-| `o` | Global | Filter: **Open** |
-| `r` | Global | Filter: **Ready** |
-| `c` | Global | Filter: **Closed** |
-| `a` | Global | Filter: **All** |
+| `o` / `r` / `c` / `a` | Global | Filter by status |
 | `q` | Global | Quit |
 
 ## CI/CD

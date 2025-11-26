@@ -10,8 +10,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Tier represents the width tier of the display
+type Tier int
+
+const (
+	TierCompact Tier = iota
+	TierNormal
+	TierWide
+	TierUltraWide
+)
+
 type IssueDelegate struct {
-	ShowExtraCols bool // Show Age and Comments columns if true
+	Tier Tier
 }
 
 func (d IssueDelegate) Height() int {
@@ -40,7 +50,7 @@ func (d IssueDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 		baseStyle = ItemStyle
 	}
 
-	// Columns
+	// Base Columns (Compact)
 	id := ColIDStyle.Render(i.Issue.ID)
 	
 	iconStr, iconColor := GetTypeIcon(string(i.Issue.IssueType))
@@ -54,9 +64,27 @@ func (d IssueDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 	// Optional Columns
 	age := ""
 	comments := ""
+	updated := ""
+	assignee := ""
+	
 	extraWidth := 0
 
-	if d.ShowExtraCols {
+	// Assignee (Normal+)
+	if d.Tier >= TierNormal {
+		if i.Issue.Assignee != "" {
+			assignee = ColAssigneeStyle.Render("@" + i.Issue.Assignee)
+			extraWidth += 12
+		} else {
+			// Even empty, we might want to reserve space or just let it collapse?
+			// Let's collapse for cleaner look, but that makes alignment jagged. 
+			// Better to fix width.
+			assignee = ColAssigneeStyle.Render("")
+			extraWidth += 12
+		}
+	}
+
+	// Age & Comments (Wide+)
+	if d.Tier >= TierWide {
 		ageStr := FormatTimeRel(i.Issue.CreatedAt)
 		age = ColAgeStyle.Render(ageStr)
 		
@@ -66,20 +94,30 @@ func (d IssueDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 		} else {
 			comments = ColCommentsStyle.Render("")
 		}
-		extraWidth = 12 + 2 // 8(Age) + 4(Comments) + gaps
+		extraWidth += 8 + 4 // Age + Comments
 	}
 
-	assignee := ""
-	assigneeWidth := 0
-	if i.Issue.Assignee != "" {
-		assignee = ColAssigneeStyle.Render("@" + i.Issue.Assignee)
-		assigneeWidth = 12 
+	// Updated (UltraWide)
+	if d.Tier >= TierUltraWide {
+		// If created == updated, maybe dim it?
+		updatedStr := FormatTimeRel(i.Issue.UpdatedAt)
+		updated = ColAgeStyle.Copy().Width(10).Render(updatedStr) // Reuse age style but wider
+		extraWidth += 10
 	}
 
 	// Calculate Title Width
-	// Fixed widths: ID(8) + Type(2) + Prio(3) + Status(12) + Assignee(12 or 0) + Extra + Spacing
-	fixedWidth := 8 + 2 + 3 + 12 + assigneeWidth + extraWidth + 8 // +8 for gaps
-	availableWidth := m.Width() - fixedWidth - 4 // -4 for left/right padding/borders
+	// Fixed widths: ID(8) + Type(2) + Prio(3) + Status(12) + Extra + Spacing
+	// Spacing depends on number of active columns. 
+	// Base gaps: ID-Type(1) Type-Prio(0) Prio-Status(0) Status-Title(1) = 2
+	// Assignee(1) Comments(1) Age(1) Updated(1)
+	
+	gaps := 4 
+	if d.Tier >= TierNormal { gaps += 1 }
+	if d.Tier >= TierWide { gaps += 2 }
+	if d.Tier >= TierUltraWide { gaps += 1 }
+
+	fixedWidth := 8 + 2 + 3 + 12 + extraWidth + gaps
+	availableWidth := m.Width() - fixedWidth - 4 // -4 for padding
 	
 	if availableWidth < 10 {
 		availableWidth = 10
@@ -93,17 +131,24 @@ func (d IssueDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 	titleStr := i.Issue.Title
 	title := titleStyle.Render(titleStr)
 
-	// Compose Row
+	// Compose Row based on Tier
 	var row string
-	if d.ShowExtraCols {
-		row = lipgloss.JoinHorizontal(lipgloss.Left,
-			id, typeIcon, prio, status, title, comments, age, assignee,
-		)
-	} else {
-		row = lipgloss.JoinHorizontal(lipgloss.Left,
-			id, typeIcon, prio, status, title, assignee,
-		)
+	
+	// Base: ID | Type | Prio | Status | Title
+	parts := []string{id, typeIcon, prio, status, title}
+	
+	if d.Tier >= TierWide {
+		parts = append(parts, comments, age)
+	}
+	
+	if d.Tier >= TierNormal {
+		parts = append(parts, assignee)
+	}
+	
+	if d.Tier >= TierUltraWide {
+		parts = append(parts, updated)
 	}
 
+	row = lipgloss.JoinHorizontal(lipgloss.Left, parts...)
 	fmt.Fprint(w, baseStyle.Render(row))
 }
