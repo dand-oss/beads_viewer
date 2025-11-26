@@ -99,6 +99,10 @@ func NewModel(issues []model.Issue) Model {
 		return issues[i].CreatedAt.After(issues[j].CreatedAt)
 	})
 
+	// Graph Analysis
+	analyzer := analysis.NewAnalyzer(issues)
+	graphStats := analyzer.Analyze()
+
 	items := make([]list.Item, len(issues))
 	for i, issue := range issues {
 		issueMap[issue.ID] = &issues[i]
@@ -111,21 +115,38 @@ func NewModel(issues []model.Issue) Model {
 			GraphScore: pr,
 			Impact:     imp,
 		}
-		
-		// Stats
-		if issue.Status == model.StatusClosed {
-			cClosed++
-		} else if issue.Status == model.StatusBlocked {
-			cBlocked++
-			cOpen++ // Blocked is technically open
-		} else {
-			cOpen++
-			// Check if ready
-			// isBlocked logic here is complex during initialization as map isn't full
-		}
 	}
 	
-	// Re-calc stats accurately
+	// Re-calc stats accurately now that map is full
+	cOpen, cReady, cBlocked, cClosed = 0, 0, 0, 0
+	for _, issue := range issues {
+		if issue.Status == model.StatusClosed {
+			cClosed++
+		} else {
+			cOpen++
+			if issue.Status == model.StatusBlocked {
+				cBlocked++
+			} else {
+				// Check if blocked by dependencies
+				isBlocked := false
+				for _, dep := range issue.Dependencies {
+					if dep.Type == model.DepBlocks {
+						blocker, exists := issueMap[dep.DependsOnID]
+						// If dependency doesn't exist, we assume not blocked? Or blocked by phantom?
+						// Usually assume blocked if dep is missing? No, if missing, can't complete?
+						// Let's assume: If blocker exists and is NOT closed, then blocked.
+						if exists && blocker.Status != model.StatusClosed {
+							isBlocked = true
+							break
+						}
+					}
+				}
+				if !isBlocked {
+					cReady++
+				}
+			}
+		}
+	}
 	cOpen, cReady, cBlocked, cClosed = 0, 0, 0, 0
 	for _, issue := range issues {
 		if issue.Status == model.StatusClosed {
@@ -154,11 +175,11 @@ func NewModel(issues []model.Issue) Model {
 	}
 
 	// Graph Analysis
-	analyzer := analysis.NewAnalyzer(issues)
-	graphStats := analyzer.Analyze()
+	analyzer = analysis.NewAnalyzer(issues)
+	graphStats = analyzer.Analyze()
 
 	// Default delegate
-	delegate := IssueDelegate{ShowExtraCols: false}
+	delegate := IssueDelegate{Tier: TierCompact}
 	l := list.New(items, delegate, 0, 0)
 	l.Title = "Beads"
 	l.SetShowHelp(false)

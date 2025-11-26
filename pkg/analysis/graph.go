@@ -177,79 +177,33 @@ func (a *Analyzer) computeHeights() map[string]float64 {
 	heights := make(map[int64]float64)
 	sorted, _ := topo.Sort(a.g)
 	
-	// Process in reverse topological order (B then A, if A->B)
-	// If A->B, A depends on B.
-	// Height of B (Prereq) = 0 (if leaf).
-	// Height of A = Height(B) + 1.
-	// This measures "Depth of Dependency Chain" below the item.
-	// High Height = Lots of upstream work required? No.
-	// Let's define:
-	// Depth: Length of chain *upwards* (prereqs).
-	// Impact: Length of chain *downwards* (dependents).
-	
-	// Let's compute "Impact Depth": How many layers of tasks depend on this?
-	// This requires reversing the graph edges or traversing differently.
-	// If A->B (A depends on B), edges point to Prereq.
-	// To find Impact, we want dist from B to A.
-	
-	// Let's assume we want to know "How critical is this?". 
-	// Critical = many dependents, long chains of dependents.
-	// We need to walk backwards from edges A->B.
-	
 	impactScores := make(map[string]float64)
 	
-	// Simple iterative approach for DAG:
-	// For every node, score = 1 + sum(score of incoming).
-	// Incoming to B is A (since A->B).
-	// gonum To(B) returns nodes pointing to B (A).
+	// Iterate forward: u depends on v (u -> v)
+	// u comes before v in topological sort.
+	// We want to calculate "Impact Depth": How many layers above depend on me?
+	// This equates to "Depth from Root" where Root is the top-level dependent task.
+	// Roots (InDegree 0) have Impact 1.
+	// If u -> v, v's impact = 1 + Impact(u).
 	
-	// We can use the reversed topo sort (Prereqs last).
-	// Iterate Prereq -> Dependent.
-	// But A->B means A is dependent. 
-	// Topo sort gives [A, B].
-	// Iterate reverse: B, A.
-	// B: score = 1 + sum(score of incoming). Incoming to B is A.
-	// A has not been processed yet?
-	// Wait. A->B. A comes BEFORE B in Topo sort.
-	// So iterating Topo sort forward:
-	// Process A. Has outgoing B. A adds its score to B?
-	// Let's stick to simple "Level" logic.
-	
-	// Let's assign "Level" based on dependencies.
-	// Level(u) = 1 + max(Level(v)) where u depends on v (u->v).
-	// This is "Dependency Depth". 
-	// High Depth = "I am the tip of a deep iceberg". (End product).
-	
-	// Let's also compute "Reverse Depth" (Impact).
-	// How many steps can I walk backwards?
-	
-	// Let's just do a simple BFS/DFS max depth for now to keep it fast.
-	// Actually, with Topo sort:
-	
-	// 1. Dependency Depth (Effort to reach me)
-	// Order: Leafs (no deps) first.
-	// But our edges are A->B (A depends on B).
-	// So Leafs are nodes with OutDegree 0.
-	// If we reverse sort: B (leaf), A.
-	// We can compute depth easily.
-	
-	for i := len(sorted)-1; i >= 0; i-- {
-		u := sorted[i]
-		uid := u.ID()
-		maxChildHeight := 0.0
+	for _, n := range sorted {
+		nid := n.ID()
+		maxParentHeight := 0.0
 		
-		// Edges are u->v.
-		to := a.g.From(uid)
+		// To(n) gives nodes p such that p -> n.
+		// p depends on n. p is a parent/dependent.
+		// Since p comes before n in sort, p is already processed.
+		to := a.g.To(nid)
 		for to.Next() {
-			v := to.Node()
-			if h, ok := heights[v.ID()]; ok {
-				if h > maxChildHeight {
-					maxChildHeight = h
+			p := to.Node()
+			if h, ok := heights[p.ID()]; ok {
+				if h > maxParentHeight {
+					maxParentHeight = h
 				}
 			}
 		}
-		heights[uid] = 1.0 + maxChildHeight
-		impactScores[a.nodeToID[uid]] = heights[uid]
+		heights[nid] = 1.0 + maxParentHeight
+		impactScores[a.nodeToID[nid]] = heights[nid]
 	}
 	
 	return impactScores
