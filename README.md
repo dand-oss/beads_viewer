@@ -49,19 +49,34 @@ No web page loads, no heavy clients. `bv` starts instantly and lets you fly thro
 ```mermaid
 graph TD
     %% Pastel Theme
-    classDef task fill:#e1f5fe,stroke:#b3e5fc,stroke-width:2px,color:#0277bd
-    classDef critical fill:#ffcdd2,stroke:#ef9a9a,stroke-width:2px,color:#c62828
-    classDef done fill:#c8e6c9,stroke:#a5d6a7,stroke-width:2px,color:#2e7d32
+    classDef data fill:#e1f5fe,stroke:#b3e5fc,stroke-width:2px,color:#0277bd
+    classDef logic fill:#fff9c4,stroke:#ffe082,stroke-width:2px,color:#fbc02d
+    classDef ui fill:#f3e5f5,stroke:#ce93d8,stroke-width:2px,color:#7b1fa2
 
-    subgraph "Project Graph Structure"
-        A[Core API]:::critical --> B[Auth Service]:::task
-        A --> C[User Schema]:::done
-        B --> D[Login UI]:::task
-        B --> E[OAuth Integration]:::task
-        C --> F[Profile Page]:::task
+    subgraph "Data Layer"
+        A[".beads/beads.jsonl"]:::data
     end
 
-    D -.-> G[E2E Tests]:::task
+    subgraph "Core Logic"
+        B[Loader]:::logic
+        C[Graph Analyzer]:::logic
+        D[PageRank & Metrics]:::logic
+    end
+
+    subgraph "TUI Layer"
+        E[Bubble Tea Model]:::ui
+        F[List View]:::ui
+        G[Graph Visualizer]:::ui
+        H[Markdown Renderer]:::ui
+    end
+
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    E --> G
+    E --> H
 ```
 
 ### Key Metrics
