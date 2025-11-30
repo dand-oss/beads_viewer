@@ -1,6 +1,7 @@
 package export
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1007,5 +1008,395 @@ func TestGenerateMarkdown_LabelsWithPipe(t *testing.T) {
 	// Normal labels should still be present
 	if !strings.Contains(md, "normal") {
 		t.Error("Missing normal label")
+	}
+}
+
+// ============================================================================
+// Shell escape tests
+// ============================================================================
+
+func TestShellEscape_SafeStrings(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"simple", "simple"},
+		{"ISSUE-123", "ISSUE-123"},
+		{"bv-qjc.1", "bv-qjc.1"},
+		{"test_id", "test_id"},
+		{"A1B2C3", "A1B2C3"},
+		{"issue:123", "issue:123"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := shellEscape(tt.input)
+			if got != tt.expected {
+				t.Errorf("shellEscape(%q) = %q; want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestShellEscape_UnsafeStrings(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"has space", "'has space'"},
+		{"with'quote", "'with'\"'\"'quote'"},
+		{"$variable", "'$variable'"},
+		{"`command`", "'`command`'"},
+		{"semi;colon", "'semi;colon'"},
+		{"pipe|char", "'pipe|char'"},
+		{"less<greater>", "'less<greater>'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := shellEscape(tt.input)
+			if got != tt.expected {
+				t.Errorf("shellEscape(%q) = %q; want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsShellSafe(t *testing.T) {
+	safeStrings := []string{
+		"simple",
+		"ISSUE-123",
+		"test_id",
+		"file.txt",
+		"a:b",
+	}
+	unsafeStrings := []string{
+		"has space",
+		"with'quote",
+		"$var",
+		"",
+		"semi;colon",
+	}
+
+	for _, s := range safeStrings {
+		if !isShellSafe(s) {
+			t.Errorf("isShellSafe(%q) = false; want true", s)
+		}
+	}
+	for _, s := range unsafeStrings {
+		if isShellSafe(s) {
+			t.Errorf("isShellSafe(%q) = true; want false", s)
+		}
+	}
+}
+
+// ============================================================================
+// Quick Actions tests
+// ============================================================================
+
+func TestGenerateQuickActions_WithOpenIssues(t *testing.T) {
+	now := time.Now()
+	issues := []model.Issue{
+		{ID: "OPEN-1", Status: model.StatusOpen, Priority: 2, CreatedAt: now, UpdatedAt: now},
+		{ID: "OPEN-2", Status: model.StatusOpen, Priority: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: "CLOSED-1", Status: model.StatusClosed, Priority: 2, CreatedAt: now, UpdatedAt: now},
+	}
+
+	result := generateQuickActions(issues)
+
+	if !strings.Contains(result, "## Quick Actions") {
+		t.Error("Missing Quick Actions header")
+	}
+	if !strings.Contains(result, "bd close OPEN-1 OPEN-2") {
+		t.Error("Missing bulk close command")
+	}
+	if !strings.Contains(result, "bd show OPEN-2") {
+		t.Error("Missing high-priority show command (P1)")
+	}
+}
+
+func TestGenerateQuickActions_WithInProgressIssues(t *testing.T) {
+	now := time.Now()
+	issues := []model.Issue{
+		{ID: "PROG-1", Status: model.StatusInProgress, Priority: 2, CreatedAt: now, UpdatedAt: now},
+		{ID: "PROG-2", Status: model.StatusInProgress, Priority: 2, CreatedAt: now, UpdatedAt: now},
+	}
+
+	result := generateQuickActions(issues)
+
+	if !strings.Contains(result, "# Close all in-progress items") {
+		t.Error("Missing in-progress close comment")
+	}
+	if !strings.Contains(result, "bd close PROG-1 PROG-2") {
+		t.Error("Missing in-progress bulk close command")
+	}
+}
+
+func TestGenerateQuickActions_WithBlockedIssues(t *testing.T) {
+	now := time.Now()
+	issues := []model.Issue{
+		{ID: "BLOCKED-1", Status: model.StatusBlocked, Priority: 2, CreatedAt: now, UpdatedAt: now},
+	}
+
+	result := generateQuickActions(issues)
+
+	if !strings.Contains(result, "# Update blocked items") {
+		t.Error("Missing blocked items comment")
+	}
+	if !strings.Contains(result, "bd update BLOCKED-1 -s in_progress") {
+		t.Error("Missing blocked update command")
+	}
+}
+
+func TestGenerateQuickActions_AllClosed(t *testing.T) {
+	now := time.Now()
+	issues := []model.Issue{
+		{ID: "CLOSED-1", Status: model.StatusClosed, Priority: 2, CreatedAt: now, UpdatedAt: now},
+		{ID: "CLOSED-2", Status: model.StatusClosed, Priority: 2, CreatedAt: now, UpdatedAt: now},
+	}
+
+	result := generateQuickActions(issues)
+
+	// Should return empty string when all issues are closed
+	if result != "" {
+		t.Errorf("Expected empty string for all-closed issues, got: %q", result)
+	}
+}
+
+func TestGenerateQuickActions_ManyOpenIssues(t *testing.T) {
+	now := time.Now()
+	issues := make([]model.Issue, 15)
+	for i := 0; i < 15; i++ {
+		issues[i] = model.Issue{
+			ID:        fmt.Sprintf("OPEN-%d", i),
+			Status:    model.StatusOpen,
+			Priority:  2,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+	}
+
+	result := generateQuickActions(issues)
+
+	// Should truncate to first 10 for large lists
+	if !strings.Contains(result, "15 total, showing first 10") {
+		t.Error("Missing truncation notice for many open issues")
+	}
+	// Should have first issue in the command
+	if !strings.Contains(result, "OPEN-0") {
+		t.Error("Missing first issue in command")
+	}
+	// Should have 10th issue (index 9) in the command
+	if !strings.Contains(result, "OPEN-9") {
+		t.Error("Missing 10th issue (OPEN-9) in command")
+	}
+	// Extract the bd close command line to verify truncation
+	// OPEN-10 should NOT appear in the bulk close command
+	closeIdx := strings.Index(result, "bd close OPEN-0")
+	if closeIdx == -1 {
+		t.Fatal("Missing bd close command")
+	}
+	// Get the line containing the close command
+	lineEnd := strings.Index(result[closeIdx:], "\n")
+	if lineEnd == -1 {
+		lineEnd = len(result) - closeIdx
+	}
+	closeLine := result[closeIdx : closeIdx+lineEnd]
+	if strings.Contains(closeLine, "OPEN-10") {
+		t.Error("Bulk close command should not include OPEN-10 (11th issue)")
+	}
+}
+
+// ============================================================================
+// Per-issue commands tests
+// ============================================================================
+
+func TestGenerateIssueCommands_OpenIssue(t *testing.T) {
+	now := time.Now()
+	issue := model.Issue{
+		ID:        "OPEN-1",
+		Status:    model.StatusOpen,
+		Priority:  2,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	result := generateIssueCommands(issue)
+
+	if !strings.Contains(result, "<details>") {
+		t.Error("Missing details tag")
+	}
+	if !strings.Contains(result, "# Start working on this issue") {
+		t.Error("Missing start working comment")
+	}
+	if !strings.Contains(result, "bd update OPEN-1 -s in_progress") {
+		t.Error("Missing update to in_progress command")
+	}
+	if !strings.Contains(result, "bd comment OPEN-1") {
+		t.Error("Missing comment command")
+	}
+	if !strings.Contains(result, "bd show OPEN-1") {
+		t.Error("Missing show command")
+	}
+}
+
+func TestGenerateIssueCommands_InProgressIssue(t *testing.T) {
+	now := time.Now()
+	issue := model.Issue{
+		ID:        "PROG-1",
+		Status:    model.StatusInProgress,
+		Priority:  2,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	result := generateIssueCommands(issue)
+
+	if !strings.Contains(result, "# Mark as complete") {
+		t.Error("Missing mark complete comment")
+	}
+	if !strings.Contains(result, "bd close PROG-1") {
+		t.Error("Missing close command")
+	}
+}
+
+func TestGenerateIssueCommands_BlockedIssue(t *testing.T) {
+	now := time.Now()
+	issue := model.Issue{
+		ID:        "BLOCKED-1",
+		Status:    model.StatusBlocked,
+		Priority:  2,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	result := generateIssueCommands(issue)
+
+	if !strings.Contains(result, "# Unblock and start working") {
+		t.Error("Missing unblock comment")
+	}
+	if !strings.Contains(result, "bd update BLOCKED-1 -s in_progress") {
+		t.Error("Missing unblock command")
+	}
+}
+
+func TestGenerateIssueCommands_ClosedIssue(t *testing.T) {
+	now := time.Now()
+	issue := model.Issue{
+		ID:        "CLOSED-1",
+		Status:    model.StatusClosed,
+		Priority:  2,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	result := generateIssueCommands(issue)
+
+	// Should return empty string for closed issues
+	if result != "" {
+		t.Errorf("Expected empty string for closed issue, got: %q", result)
+	}
+}
+
+func TestGenerateIssueCommands_SpecialCharID(t *testing.T) {
+	now := time.Now()
+	issue := model.Issue{
+		ID:        "issue with spaces",
+		Status:    model.StatusOpen,
+		Priority:  2,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	result := generateIssueCommands(issue)
+
+	// ID should be shell-escaped
+	if !strings.Contains(result, "'issue with spaces'") {
+		t.Error("ID with spaces should be shell-escaped with single quotes")
+	}
+}
+
+// ============================================================================
+// Integration test for command snippets in full output
+// ============================================================================
+
+func TestGenerateMarkdown_IncludesQuickActions(t *testing.T) {
+	now := time.Now()
+	issues := []model.Issue{
+		{ID: "ACT-1", Title: "Open Issue", Status: model.StatusOpen, Priority: 0, CreatedAt: now, UpdatedAt: now},
+		{ID: "ACT-2", Title: "In Progress", Status: model.StatusInProgress, Priority: 1, CreatedAt: now, UpdatedAt: now},
+	}
+
+	md, err := GenerateMarkdown(issues, "Actions Test")
+	if err != nil {
+		t.Fatalf("GenerateMarkdown returned error: %v", err)
+	}
+
+	// Quick Actions should appear after Summary
+	summaryIdx := strings.Index(md, "## Summary")
+	quickActionsIdx := strings.Index(md, "## Quick Actions")
+	tocIdx := strings.Index(md, "## Table of Contents")
+
+	if quickActionsIdx == -1 {
+		t.Fatal("Missing Quick Actions section")
+	}
+	if summaryIdx > quickActionsIdx {
+		t.Error("Quick Actions should come after Summary")
+	}
+	if quickActionsIdx > tocIdx {
+		t.Error("Quick Actions should come before Table of Contents")
+	}
+}
+
+func TestGenerateMarkdown_IncludesPerIssueCommands(t *testing.T) {
+	now := time.Now()
+	issues := []model.Issue{
+		{ID: "CMD-1", Title: "Test Issue", Status: model.StatusOpen, Priority: 2, CreatedAt: now, UpdatedAt: now},
+	}
+
+	md, err := GenerateMarkdown(issues, "Per-Issue Commands Test")
+	if err != nil {
+		t.Fatalf("GenerateMarkdown returned error: %v", err)
+	}
+
+	// Per-issue commands should be in collapsible details
+	if !strings.Contains(md, "<details>") {
+		t.Error("Missing details tag for per-issue commands")
+	}
+	if !strings.Contains(md, "📋 Commands") {
+		t.Error("Missing Commands summary text")
+	}
+	if !strings.Contains(md, "bd update CMD-1") {
+		t.Error("Missing per-issue update command")
+	}
+}
+
+func TestGenerateMarkdown_ClosedIssueNoCommands(t *testing.T) {
+	now := time.Now()
+	issues := []model.Issue{
+		{ID: "CLOSED-1", Title: "Closed Issue", Status: model.StatusClosed, Priority: 2, CreatedAt: now, UpdatedAt: now},
+	}
+
+	md, err := GenerateMarkdown(issues, "Closed Commands Test")
+	if err != nil {
+		t.Fatalf("GenerateMarkdown returned error: %v", err)
+	}
+
+	// Closed issues should not have command snippets
+	// The issue section should exist, but no <details> for commands
+	issueHeaderIdx := strings.Index(md, "## • CLOSED-1")
+	if issueHeaderIdx == -1 {
+		t.Fatal("Missing issue header")
+	}
+
+	// Get the section for this issue (up to the next --- or end)
+	issueSection := md[issueHeaderIdx:]
+	nextSeparator := strings.Index(issueSection, "\n---\n")
+	if nextSeparator != -1 {
+		issueSection = issueSection[:nextSeparator]
+	}
+
+	if strings.Contains(issueSection, "<details>") {
+		t.Error("Closed issue should not have command snippets")
 	}
 }

@@ -1,6 +1,7 @@
 package main_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -99,6 +100,11 @@ func TestEndToEndDriftWorkflow(t *testing.T) {
 		t.Fatal("Expected JSON drift check to fail with exit code")
 	}
 
+	// Some builds may emit a leading debug line; strip anything before the first '{'
+	if idx := bytes.IndexByte(outJson, '{'); idx > 0 {
+		outJson = outJson[idx:]
+	}
+
 	var result map[string]interface{}
 	if err := json.Unmarshal(outJson, &result); err != nil {
 		t.Fatalf("Failed to parse JSON output: %v\n%s", err, outJson)
@@ -169,16 +175,16 @@ func TestDriftAlerts(t *testing.T) {
 	// Total Edges: 9.
 	// Density = 9/90 = 0.1.
 	// Increase: (0.1 - 0.0111) / 0.0111 ~ 800%. Warning.
-	
+
 	// Blocked:
 	// Mark B..J as "blocked".
 	// Total Blocked: 9.
 	// Baseline Blocked: 0.
 	// Delta: 9. Threshold 5. Warning.
-	
+
 	driftContent := ""
 	driftContent += `{"id": "A", "title": "Task A", "status": "open", "issue_type": "task"}` + "\n"
-	
+
 	// B..J depend on A and are blocked
 	allIds := []string{"B", "C", "D", "E", "F", "G", "H", "I", "J"}
 	for _, id := range allIds {
@@ -284,12 +290,12 @@ pagerank_change_warning_pct: 1000
 	}
 
 	// Check Drift
-	// NOTE: PageRank changes will still trigger a warning (exit 2) because "entered top" logic 
+	// NOTE: PageRank changes will still trigger a warning (exit 2) because "entered top" logic
 	// doesn't respect the percentage threshold. We only check that Blocked warning is suppressed.
 	cmdCheck := exec.Command(binPath, "--check-drift")
 	cmdCheck.Dir = envDir
 	out, err = cmdCheck.CombinedOutput()
-	
+
 	// We expect exit code 2 due to PageRank changes (unavoidable with new nodes)
 	// But we MUST NOT see "Blocked issues increased"
 	if err == nil {
@@ -300,7 +306,7 @@ pagerank_change_warning_pct: 1000
 			t.Errorf("Expected exit code 2 (PR warning), got %v", err)
 		}
 	}
-	
+
 	output := string(out)
 	if strings.Contains(output, "Blocked issues increased") {
 		t.Errorf("Expected blocked warning to be suppressed by high threshold, but found it:\n%s", output)
@@ -321,7 +327,7 @@ pagerank_change_warning_pct: 1000
 	}
 
 	// Write custom config: Blocked Increase Threshold = 1
-configContent = `blocked_increase_threshold: 1
+	configContent = `blocked_increase_threshold: 1
 node_growth_info_pct: 1000
 edge_growth_info_pct: 1000
 pagerank_change_warning_pct: 1000
@@ -362,7 +368,7 @@ func TestDriftErrorHandling(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(envDir, ".beads"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// Create minimal beads file
 	beadsPath := filepath.Join(envDir, ".beads", "beads.jsonl")
 	if err := os.WriteFile(beadsPath, []byte(`{"id":"A","status":"open","issue_type":"task"}`+"\n"), 0644); err != nil {
@@ -376,7 +382,7 @@ func TestDriftErrorHandling(t *testing.T) {
 	cmdCheck := exec.Command(binPath, "--check-drift")
 	cmdCheck.Dir = envDir
 	out, err := cmdCheck.CombinedOutput()
-	
+
 	if err == nil {
 		t.Error("Expected error when baseline missing, got success")
 	} else {
@@ -395,13 +401,13 @@ func TestDriftErrorHandling(t *testing.T) {
 	// Scenario 2: Corrupt Baseline
 	// -------------------------------------------------------------------------
 	t.Log("Scenario 2: Corrupt Baseline")
-	
+
 	baselineDir := filepath.Join(envDir, ".bv")
 	if err := os.MkdirAll(baselineDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	baselinePath := filepath.Join(baselineDir, "baseline.json")
-	
+
 	// Write invalid JSON
 	if err := os.WriteFile(baselinePath, []byte(`{not valid json}`), 0644); err != nil {
 		t.Fatal(err)
@@ -410,7 +416,7 @@ func TestDriftErrorHandling(t *testing.T) {
 	cmdCheck = exec.Command(binPath, "--check-drift")
 	cmdCheck.Dir = envDir
 	out, err = cmdCheck.CombinedOutput()
-	
+
 	if err == nil {
 		t.Error("Expected error when baseline corrupt, got success")
 	} else {
@@ -429,7 +435,7 @@ func TestDriftErrorHandling(t *testing.T) {
 	// Scenario 3: Invalid Drift Config
 	// -------------------------------------------------------------------------
 	t.Log("Scenario 3: Invalid Drift Config")
-	
+
 	// Restore valid baseline
 	cmdSave := exec.Command(binPath, "--save-baseline", "Restore")
 	cmdSave.Dir = envDir
@@ -446,12 +452,12 @@ func TestDriftErrorHandling(t *testing.T) {
 	cmdCheck = exec.Command(binPath, "--check-drift")
 	cmdCheck.Dir = envDir
 	out, err = cmdCheck.CombinedOutput()
-	
+
 	// Should still SUCCEED (fallback to defaults) but print warning
 	if err != nil {
 		t.Errorf("Expected success (fallback) with invalid config, got error: %v\nOutput: %s", err, out)
 	}
-	
+
 	output := string(out)
 	if !strings.Contains(output, "Warning: Error loading drift config") {
 		t.Errorf("Expected warning about invalid config, got:\n%s", output)

@@ -107,3 +107,129 @@ func TestEndToEndRobotPlan(t *testing.T) {
 		t.Error("Expected at least one track in execution plan")
 	}
 }
+
+func TestEndToEndRobotInsights(t *testing.T) {
+	// 1. Build the binary
+	tempDir := t.TempDir()
+	binPath := filepath.Join(tempDir, "bv")
+
+	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/bv/main.go")
+	cmd.Dir = "../../"
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Build failed: %v\n%s", err, out)
+	}
+
+	// 2. Create environment
+	envDir := filepath.Join(tempDir, "env")
+	if err := os.MkdirAll(filepath.Join(envDir, ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	jsonlContent := `{"id": "A", "title": "Root", "status": "open", "priority": 1}
+{"id": "B", "title": "Child", "status": "open", "priority": 1, "dependencies": [{"issue_id": "B", "depends_on_id": "A", "type": "blocks"}]}`
+	if err := os.WriteFile(filepath.Join(envDir, ".beads", "beads.jsonl"), []byte(jsonlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Run bv --robot-insights
+	runCmd := exec.Command(binPath, "--robot-insights")
+	runCmd.Dir = envDir
+	out, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("--robot-insights failed: %v\n%s", err, out)
+	}
+
+	// 4. Verify output
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("--robot-insights output is not valid JSON: %v\nOutput: %s", err, out)
+	}
+
+	if _, ok := result["Bottlenecks"]; !ok {
+		t.Error("missing 'Bottlenecks'")
+	}
+	if _, ok := result["Stats"]; !ok {
+		t.Error("missing 'Stats'")
+	}
+}
+
+func TestEndToEndRobotPriority(t *testing.T) {
+	// 1. Build the binary
+	tempDir := t.TempDir()
+	binPath := filepath.Join(tempDir, "bv")
+
+	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/bv/main.go")
+	cmd.Dir = "../../"
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Build failed: %v\n%s", err, out)
+	}
+
+	// 2. Create environment
+	envDir := filepath.Join(tempDir, "env")
+	if err := os.MkdirAll(filepath.Join(envDir, ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a mis-prioritized item (High impact but Low priority) to trigger recommendation
+	jsonlContent := `{"id": "IMP-1", "title": "Important", "status": "open", "priority": 5}
+{"id": "DEP-1", "title": "Dependent 1", "status": "open", "dependencies": [{"issue_id": "DEP-1", "depends_on_id": "IMP-1", "type": "blocks"}]}
+{"id": "DEP-2", "title": "Dependent 2", "status": "open", "dependencies": [{"issue_id": "DEP-2", "depends_on_id": "IMP-1", "type": "blocks"}]}`
+	if err := os.WriteFile(filepath.Join(envDir, ".beads", "beads.jsonl"), []byte(jsonlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Run bv --robot-priority
+	runCmd := exec.Command(binPath, "--robot-priority")
+	runCmd.Dir = envDir
+	out, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("--robot-priority failed: %v\n%s", err, out)
+	}
+
+	// 4. Verify output
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("--robot-priority output is not valid JSON: %v\nOutput: %s", err, out)
+	}
+
+	if _, ok := result["recommendations"]; !ok {
+		t.Error("missing 'recommendations'")
+	}
+}
+
+func TestEndToEndRobotRecipes(t *testing.T) {
+	// 1. Build the binary
+	tempDir := t.TempDir()
+	binPath := filepath.Join(tempDir, "bv")
+
+	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/bv/main.go")
+	cmd.Dir = "../../"
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Build failed: %v\n%s", err, out)
+	}
+
+	// 2. Create environment (doesn't need beads file strictly, but loader checks)
+	envDir := filepath.Join(tempDir, "env")
+	if err := os.MkdirAll(filepath.Join(envDir, ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(envDir, ".beads", "beads.jsonl"), []byte("{}"), 0644)
+
+	// 3. Run bv --robot-recipes
+	runCmd := exec.Command(binPath, "--robot-recipes")
+	runCmd.Dir = envDir
+	out, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("--robot-recipes failed: %v\n%s", err, out)
+	}
+
+	// 4. Verify output
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("--robot-recipes output is not valid JSON: %v\nOutput: %s", err, out)
+	}
+
+	if _, ok := result["recipes"]; !ok {
+		t.Error("missing 'recipes'")
+	}
+}

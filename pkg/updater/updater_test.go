@@ -117,9 +117,7 @@ func TestCompareVersions_InvalidVersions(t *testing.T) {
 		{"same string", "alpha", "alpha", 0},
 
 		// Version with extra parts (semver with pre-release)
-		// Note: current implementation doesn't handle pre-release properly
-		// so these fall back to lexicographic (longer string is "greater")
-		{"version with suffix", "1.0.0-alpha", "1.0.0", 1}, // lexicographic: longer string wins
+		{"prerelease lower", "1.0.0-alpha", "1.0.0", -1}, // prerelease should be lower
 
 		// Empty strings
 		{"empty vs empty", "", "", 0},
@@ -135,6 +133,20 @@ func TestCompareVersions_InvalidVersions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCompareVersions_PrereleaseOrdering(t *testing.T) {
+	t.Run("prerelease vs prerelease same base", func(t *testing.T) {
+		if got := compareVersions("v1.0.0-alpha", "v1.0.0-beta"); got >= 0 {
+			t.Errorf("expected alpha < beta when base equal; got %d", got)
+		}
+	})
+
+	t.Run("prerelease vs release", func(t *testing.T) {
+		if got := compareVersions("v1.2.3-rc1", "v1.2.3"); got >= 0 {
+			t.Errorf("expected prerelease < release; got %d", got)
+		}
+	})
 }
 
 func TestCompareVersions_Symmetry(t *testing.T) {

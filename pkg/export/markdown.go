@@ -2,6 +2,7 @@ package export
 
 import (
 	"fmt"
+	"hash/fnv"
 	"os"
 	"regexp"
 	"sort"
@@ -99,6 +100,9 @@ func GenerateMarkdown(issues []model.Issue, title string) (string, error) {
 	sb.WriteString(fmt.Sprintf("| Blocked | %d |\n", blocked))
 	sb.WriteString(fmt.Sprintf("| Closed | %d |\n\n", closed))
 
+	// Quick Actions Section
+	sb.WriteString(generateQuickActions(issues))
+
 	// Table of Contents
 	sb.WriteString("## Table of Contents\n\n")
 	for _, i := range issues {
@@ -122,13 +126,35 @@ func GenerateMarkdown(issues []model.Issue, title string) (string, error) {
 
 	hasLinks := false
 	issueIDs := make(map[string]bool)
-
 	for _, i := range issues {
 		issueIDs[i.ID] = true
 	}
 
+	// Build deterministic, collision-free Mermaid IDs
+	safeIDMap := make(map[string]string)
+	usedSafe := make(map[string]bool)
+	getSafeID := func(orig string) string {
+		if safe, ok := safeIDMap[orig]; ok {
+			return safe
+		}
+		base := sanitizeMermaidID(orig)
+		if base == "" {
+			base = "node"
+		}
+		safe := base
+		if usedSafe[safe] && safeIDMap[orig] == "" {
+			// Collision: derive stable hash-based suffix
+			h := fnv.New32a()
+			_, _ = h.Write([]byte(orig))
+			safe = fmt.Sprintf("%s_%x", base, h.Sum32())
+		}
+		usedSafe[safe] = true
+		safeIDMap[orig] = safe
+		return safe
+	}
+
 	for _, i := range issues {
-		safeID := sanitizeMermaidID(i.ID)
+		safeID := getSafeID(i.ID)
 		safeTitle := sanitizeMermaidText(i.Title)
 		// Also sanitize the ID for the label in case it contains quotes or special chars
 		safeLabelID := sanitizeMermaidText(i.ID)
@@ -160,7 +186,7 @@ func GenerateMarkdown(issues []model.Issue, title string) (string, error) {
 				continue
 			}
 
-			safeDepID := sanitizeMermaidID(dep.DependsOnID)
+			safeDepID := getSafeID(dep.DependsOnID)
 			linkStyle := "-.->" // Dashed for related
 			if dep.Type == model.DepBlocks {
 				linkStyle = "==>" // Bold for blockers
@@ -251,6 +277,9 @@ func GenerateMarkdown(issues []model.Issue, title string) (string, error) {
 			}
 		}
 
+		// Per-issue command snippets
+		sb.WriteString(generateIssueCommands(i))
+
 		sb.WriteString("---\n\n")
 	}
 
@@ -340,4 +369,142 @@ func SaveMarkdownToFile(issues []model.Issue, filename string) error {
 		return err
 	}
 	return os.WriteFile(filename, []byte(content), 0644)
+}
+
+// generateQuickActions creates a Quick Actions section with bulk commands
+func generateQuickActions(issues []model.Issue) string {
+	var sb strings.Builder
+
+	// Collect non-closed issues for bulk operations
+	var openIDs, inProgressIDs, blockedIDs []string
+	var highPriorityIDs []string // P0 and P1
+
+	for _, i := range issues {
+		escapedID := shellEscape(i.ID)
+		switch i.Status {
+		case model.StatusOpen:
+			openIDs = append(openIDs, escapedID)
+		case model.StatusInProgress:
+			inProgressIDs = append(inProgressIDs, escapedID)
+		case model.StatusBlocked:
+			blockedIDs = append(blockedIDs, escapedID)
+		}
+		if i.Status != model.StatusClosed && i.Priority <= 1 {
+			highPriorityIDs = append(highPriorityIDs, escapedID)
+		}
+	}
+
+	// Only generate section if there are actionable items
+	if len(openIDs)+len(inProgressIDs)+len(blockedIDs) == 0 {
+		return ""
+	}
+
+	sb.WriteString("## Quick Actions\n\n")
+	sb.WriteString("Ready-to-run commands for bulk operations:\n\n")
+	sb.WriteString("```bash\n")
+
+	// Close in-progress items (most common action)
+	if len(inProgressIDs) > 0 {
+		sb.WriteString("# Close all in-progress items\n")
+		sb.WriteString(fmt.Sprintf("bd close %s\n\n", strings.Join(inProgressIDs, " ")))
+	}
+
+	// Close open items
+	if len(openIDs) > 0 && len(openIDs) <= 10 {
+		sb.WriteString("# Close all open items\n")
+		sb.WriteString(fmt.Sprintf("bd close %s\n\n", strings.Join(openIDs, " ")))
+	} else if len(openIDs) > 10 {
+		sb.WriteString(fmt.Sprintf("# Close open items (%d total, showing first 10)\n", len(openIDs)))
+		sb.WriteString(fmt.Sprintf("bd close %s\n\n", strings.Join(openIDs[:10], " ")))
+	}
+
+	// Bulk priority update for high-priority items
+	if len(highPriorityIDs) > 0 {
+		sb.WriteString("# View high-priority items (P0/P1)\n")
+		sb.WriteString(fmt.Sprintf("bd show %s\n\n", strings.Join(highPriorityIDs, " ")))
+	}
+
+	// Unblock blocked items
+	if len(blockedIDs) > 0 {
+		sb.WriteString("# Update blocked items to in_progress when unblocked\n")
+		sb.WriteString(fmt.Sprintf("bd update %s -s in_progress\n", strings.Join(blockedIDs, " ")))
+	}
+
+	sb.WriteString("```\n\n")
+
+	return sb.String()
+}
+
+// generateIssueCommands creates command snippets for a single issue
+func generateIssueCommands(issue model.Issue) string {
+	var sb strings.Builder
+
+	// Skip command snippets for closed issues
+	if issue.Status == model.StatusClosed {
+		return ""
+	}
+
+	escapedID := shellEscape(issue.ID)
+
+	sb.WriteString("<details>\n<summary>📋 Commands</summary>\n\n")
+	sb.WriteString("```bash\n")
+
+	// Status transitions based on current state
+	switch issue.Status {
+	case model.StatusOpen:
+		sb.WriteString("# Start working on this issue\n")
+		sb.WriteString(fmt.Sprintf("bd update %s -s in_progress\n\n", escapedID))
+	case model.StatusInProgress:
+		sb.WriteString("# Mark as complete\n")
+		sb.WriteString(fmt.Sprintf("bd close %s\n\n", escapedID))
+	case model.StatusBlocked:
+		sb.WriteString("# Unblock and start working\n")
+		sb.WriteString(fmt.Sprintf("bd update %s -s in_progress\n\n", escapedID))
+	}
+
+	// Common actions
+	sb.WriteString("# Add a comment\n")
+	sb.WriteString(fmt.Sprintf("bd comment %s 'Your comment here'\n\n", escapedID))
+
+	sb.WriteString("# Change priority (0=Critical, 1=High, 2=Medium, 3=Low)\n")
+	sb.WriteString(fmt.Sprintf("bd update %s -p 1\n\n", escapedID))
+
+	sb.WriteString("# View full details\n")
+	sb.WriteString(fmt.Sprintf("bd show %s\n", escapedID))
+
+	sb.WriteString("```\n\n")
+	sb.WriteString("</details>\n\n")
+
+	return sb.String()
+}
+
+// shellEscape escapes a string for safe use in shell commands.
+// Uses single quotes and escapes any single quotes within the string.
+func shellEscape(s string) string {
+	// If the string contains no special characters, return as-is
+	if isShellSafe(s) {
+		return s
+	}
+	// Otherwise, wrap in single quotes and escape any single quotes
+	escaped := strings.ReplaceAll(s, "'", "'\"'\"'")
+	return "'" + escaped + "'"
+}
+
+// isShellSafe returns true if the string is safe to use unquoted in shell
+func isShellSafe(s string) bool {
+	for _, r := range s {
+		if !isShellSafeChar(r) {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+// isShellSafeChar returns true if the character is safe in unquoted shell strings
+func isShellSafeChar(r rune) bool {
+	// Allow alphanumeric, hyphen, underscore, period, and some punctuation
+	return (r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') ||
+		r == '-' || r == '_' || r == '.' || r == ':'
 }

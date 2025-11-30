@@ -1,0 +1,192 @@
+package hooks
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+// HookResult contains the result of a hook execution
+type HookResult struct {
+	Hook     Hook
+	Phase    HookPhase
+	Success  bool
+	Stdout   string
+	Stderr   string
+	Duration time.Duration
+	Error    error
+}
+
+// Executor runs hooks with proper environment and timeout handling
+type Executor struct {
+	config  *Config
+	context ExportContext
+	results []HookResult
+}
+
+// NewExecutor creates a new hook executor
+func NewExecutor(config *Config, ctx ExportContext) *Executor {
+	return &Executor{
+		config:  config,
+		context: ctx,
+		results: make([]HookResult, 0),
+	}
+}
+
+// RunPreExport executes all pre-export hooks
+// Returns error if any hook fails with on_error="fail"
+func (e *Executor) RunPreExport() error {
+	if e.config == nil {
+		return nil
+	}
+
+	for _, hook := range e.config.Hooks.PreExport {
+		result := e.runHook(hook, PreExport)
+		e.results = append(e.results, result)
+
+		if !result.Success && hook.OnError == "fail" {
+			return fmt.Errorf("pre-export hook %q failed: %w", hook.Name, result.Error)
+		}
+	}
+
+	return nil
+}
+
+// RunPostExport executes all post-export hooks
+// Errors are logged but don't fail (unless on_error="fail")
+func (e *Executor) RunPostExport() error {
+	if e.config == nil {
+		return nil
+	}
+
+	var firstError error
+	for _, hook := range e.config.Hooks.PostExport {
+		result := e.runHook(hook, PostExport)
+		e.results = append(e.results, result)
+
+		if !result.Success && hook.OnError == "fail" && firstError == nil {
+			firstError = fmt.Errorf("post-export hook %q failed: %w", hook.Name, result.Error)
+		}
+	}
+
+	return firstError
+}
+
+// runHook executes a single hook with timeout and environment
+func (e *Executor) runHook(hook Hook, phase HookPhase) HookResult {
+	result := HookResult{
+		Hook:  hook,
+		Phase: phase,
+	}
+
+	start := time.Now()
+
+	// Create context with timeout
+	timeout := hook.Timeout
+	if timeout == 0 {
+		timeout = DefaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// Create command - use shell to interpret the command
+	cmd := exec.CommandContext(ctx, "sh", "-c", hook.Command)
+
+	// Build environment
+	cmd.Env = os.Environ()
+
+	// Add export context variables
+	cmd.Env = append(cmd.Env, e.context.ToEnv()...)
+
+	// Add hook-specific env vars (with ${VAR} expansion from current env)
+	for key, value := range hook.Env {
+		expandedValue := os.ExpandEnv(value)
+		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, expandedValue))
+	}
+
+	// Capture output
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	// Run the command
+	err := cmd.Run()
+	result.Duration = time.Since(start)
+	result.Stdout = strings.TrimSpace(stdout.String())
+	result.Stderr = strings.TrimSpace(stderr.String())
+
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			result.Error = fmt.Errorf("timeout after %v", timeout)
+		} else {
+			result.Error = err
+		}
+		result.Success = false
+	} else {
+		result.Success = true
+	}
+
+	return result
+}
+
+// Results returns all hook execution results
+func (e *Executor) Results() []HookResult {
+	return e.results
+}
+
+// Summary returns a human-readable summary of hook execution
+func (e *Executor) Summary() string {
+	if len(e.results) == 0 {
+		return "No hooks executed"
+	}
+
+	var sb strings.Builder
+	var succeeded, failed int
+
+	for _, r := range e.results {
+		if r.Success {
+			succeeded++
+			sb.WriteString(fmt.Sprintf("  [OK] %s (%v)\n", r.Hook.Name, r.Duration.Round(time.Millisecond)))
+		} else {
+			failed++
+			sb.WriteString(fmt.Sprintf("  [FAIL] %s: %v\n", r.Hook.Name, r.Error))
+			if r.Stderr != "" {
+				sb.WriteString(fmt.Sprintf("         stderr: %s\n", truncate(r.Stderr, 200)))
+			}
+		}
+	}
+
+	header := fmt.Sprintf("Hook execution: %d succeeded, %d failed\n", succeeded, failed)
+	return header + sb.String()
+}
+
+// truncate shortens a string to max length with ellipsis
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
+}
+
+// RunHooks is a convenience function that runs all hooks for an export operation
+func RunHooks(projectDir string, ctx ExportContext, noHooks bool) (*Executor, error) {
+	if noHooks {
+		return nil, nil
+	}
+
+	loader := NewLoader(WithProjectDir(projectDir))
+	if err := loader.Load(); err != nil {
+		return nil, fmt.Errorf("loading hooks: %w", err)
+	}
+
+	if !loader.HasHooks() {
+		return nil, nil
+	}
+
+	executor := NewExecutor(loader.Config(), ctx)
+	return executor, nil
+}
