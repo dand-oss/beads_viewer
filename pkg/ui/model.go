@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"beads_viewer/pkg/analysis"
-	"beads_viewer/pkg/export"
-	"beads_viewer/pkg/loader"
-	"beads_viewer/pkg/model"
-	"beads_viewer/pkg/recipe"
-	"beads_viewer/pkg/updater"
-	"beads_viewer/pkg/watcher"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/export"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/loader"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/recipe"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/updater"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/watcher"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/list"
@@ -414,6 +414,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Phase 2 analysis complete - regenerate insights with full data
 		ins := m.analysis.GenerateInsights(len(m.issues))
 		m.insightsPanel = NewInsightsModel(ins, m.issueMap, m.theme)
+		bodyHeight := m.height - 1
+		if bodyHeight < 5 {
+			bodyHeight = 5
+		}
+		m.insightsPanel.SetSize(m.width, bodyHeight)
 		m.graphView = NewGraphModel(m.issues, &ins, m.theme)
 
 		// Generate priority recommendations now that Phase 2 is ready
@@ -587,6 +592,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Regenerate sub-views (with Phase 1 data; Phase 2 will update via Phase2ReadyMsg)
 		ins := m.analysis.GenerateInsights(len(m.issues))
 		m.insightsPanel = NewInsightsModel(ins, m.issueMap, m.theme)
+		bodyHeight := m.height - 1
+		if bodyHeight < 5 {
+			bodyHeight = 5
+		}
+		m.insightsPanel.SetSize(m.width, bodyHeight)
 		m.graphView = NewGraphModel(m.issues, &ins, m.theme)
 		m.board = NewBoardModel(m.issues, m.theme)
 
@@ -769,7 +779,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.isGraphView = false
 					m.isBoardView = false
 					m.isActionableView = false
+					// Refresh insights using latest analysis snapshot
+					if m.analysis != nil {
+						ins := m.analysis.GenerateInsights(len(m.issues))
+						m.insightsPanel = NewInsightsModel(ins, m.issueMap, m.theme)
+						panelHeight := m.height - 2
+						if panelHeight < 3 {
+							panelHeight = 3
+						}
+						m.insightsPanel.SetSize(m.width, panelHeight)
+					}
 				}
+				return m, nil
 
 			case "p":
 				// Toggle priority hints
