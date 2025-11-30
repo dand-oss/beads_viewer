@@ -26,6 +26,7 @@ func TestAnalyzerProfileAndGetters(t *testing.T) {
 		t.Fatalf("phase2 should be ready after AnalyzeWithProfile")
 	}
 
+	_ = a.GetIssue("A")
 	_ = stats.GetPageRankScore("A")
 	_ = stats.GetBetweennessScore("A")
 	_ = stats.GetEigenvectorScore("A")
