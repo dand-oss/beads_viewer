@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_OWNER="Dicklesworthstone"
+REPO_OWNER="dand-oss"
 REPO_NAME="beads_viewer"
 BIN_NAME="bv"
 
@@ -31,7 +31,20 @@ default_install_dir() {
         return
     fi
 
-    # Prefer writable Homebrew/standard prefixes on macOS first
+    # Prefer ~/.local/bin (user-local, no sudo required)
+    local local_bin="$HOME/.local/bin"
+    if [ -d "$local_bin" ] && [ -w "$local_bin" ]; then
+        echo "$local_bin"
+        return
+    fi
+
+    # Create ~/.local/bin if it doesn't exist
+    if [ -n "$HOME" ] && mkdir -p "$local_bin" 2>/dev/null; then
+        echo "$local_bin"
+        return
+    fi
+
+    # Fallback to Homebrew/standard prefixes on macOS
     for dir in /usr/local/bin /opt/homebrew/bin /opt/local/bin; do
         if [ -d "$dir" ] && [ -w "$dir" ]; then
             echo "$dir"
@@ -48,7 +61,7 @@ default_install_dir() {
         fi
     done
 
-    echo "/usr/local/bin"
+    echo "$HOME/.local/bin"
 }
 
 INSTALL_DIR="$(default_install_dir)"
@@ -502,7 +515,7 @@ try_go_install() {
     fi
 
     if [ "$fetched" -ne 1 ]; then
-        tarball_url="https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/main"
+        tarball_url="https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/master"
         tarball_path="$tmp_dir/source.tar.gz"
         if ! download_file "$tarball_url" "$tarball_path"; then
             print_error "Failed to download source tarball from GitHub."
