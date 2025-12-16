@@ -690,12 +690,14 @@ func (a *Analyzer) computePhase2WithProfile(stats *GraphStats, config AnalysisCo
 			prDone <- network.PageRank(a.g, 0.85, 1e-6)
 		}()
 
+		timer := time.NewTimer(config.PageRankTimeout)
 		select {
 		case pr := <-prDone:
+			timer.Stop()
 			for id, score := range pr {
 				localPageRank[a.nodeToID[id]] = score
 			}
-		case <-time.After(config.PageRankTimeout):
+		case <-timer.C:
 			profile.PageRankTO = true
 			uniform := 1.0 / float64(len(a.issueMap))
 			for id := range a.issueMap {
@@ -724,8 +726,10 @@ func (a *Analyzer) computePhase2WithProfile(stats *GraphStats, config AnalysisCo
 			}
 		}()
 
+		timer := time.NewTimer(config.BetweennessTimeout)
 		select {
 		case result := <-bwDone:
+			timer.Stop()
 			for id, score := range result.Scores {
 				localBetweenness[a.nodeToID[id]] = score
 			}
@@ -733,7 +737,7 @@ func (a *Analyzer) computePhase2WithProfile(stats *GraphStats, config AnalysisCo
 			if result.Mode == BetweennessApproximate {
 				stats.Config.BetweennessIsApproximate = true
 			}
-		case <-time.After(config.BetweennessTimeout):
+		case <-timer.C:
 			profile.BetweennessTO = true
 		}
 		profile.Betweenness = time.Since(bwStart)
@@ -756,13 +760,15 @@ func (a *Analyzer) computePhase2WithProfile(stats *GraphStats, config AnalysisCo
 			hitsDone <- network.HITS(a.g, 1e-3)
 		}()
 
+		timer := time.NewTimer(config.HITSTimeout)
 		select {
 		case hubAuth := <-hitsDone:
+			timer.Stop()
 			for id, ha := range hubAuth {
 				localHubs[a.nodeToID[id]] = ha.Hub
 				localAuthorities[a.nodeToID[id]] = ha.Authority
 			}
-		case <-time.After(config.HITSTimeout):
+		case <-timer.C:
 			profile.HITSTO = true
 		}
 		profile.HITS = time.Since(hitsStart)
@@ -801,8 +807,10 @@ func (a *Analyzer) computePhase2WithProfile(stats *GraphStats, config AnalysisCo
 				cyclesDone <- topo.DirectedCyclesIn(a.g)
 			}()
 
+			timer := time.NewTimer(config.CyclesTimeout)
 			select {
 			case cycles := <-cyclesDone:
+				timer.Stop()
 				profile.CycleCount = len(cycles)
 				cyclesToProcess := cycles
 				if len(cyclesToProcess) > maxCycles {
@@ -816,7 +824,7 @@ func (a *Analyzer) computePhase2WithProfile(stats *GraphStats, config AnalysisCo
 					}
 					localCycles = append(localCycles, cycleIDs)
 				}
-			case <-time.After(config.CyclesTimeout):
+			case <-timer.C:
 				profile.CyclesTO = true
 			}
 		}
