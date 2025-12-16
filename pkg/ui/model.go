@@ -1570,8 +1570,6 @@ func (m Model) renderQuitConfirm() string {
 	)
 }
 
-
-
 func (m Model) renderListWithHeader() string {
 	t := m.theme
 
@@ -1890,69 +1888,94 @@ func (m Model) renderHelpOverlay() string {
 
 func (m Model) renderLabelHealthDetail(lh analysis.LabelHealth) string {
 	t := m.theme
+	innerWidth := m.width - 10
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
 
-	// Create styles similar to help overlay
+	bar := func(score int) string {
+		lvl := analysis.HealthLevelFromScore(score)
+		fill := innerWidth * score / 100
+		if fill < 0 {
+			fill = 0
+		}
+		if fill > innerWidth {
+			fill = innerWidth
+		}
+		filled := strings.Repeat("█", fill)
+		blank := strings.Repeat("░", innerWidth-fill)
+		style := t.Base
+		switch lvl {
+		case analysis.HealthLevelHealthy:
+			style = style.Foreground(t.Open)
+		case analysis.HealthLevelWarning:
+			style = style.Foreground(t.Feature)
+		default:
+			style = style.Foreground(t.Blocked)
+		}
+		return style.Render(filled + blank)
+	}
+
 	boxStyle := t.Renderer.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Primary).
 		Padding(1, 2)
 
-	titleStyle := t.Renderer.NewStyle().
-		Foreground(t.Primary).
-		Bold(true).
-		MarginBottom(1)
-
-	labelStyle := t.Renderer.NewStyle().
-		Foreground(t.Secondary).
-		Bold(true)
-
-	valueStyle := t.Renderer.NewStyle().
-		Foreground(t.Base.GetForeground())
+	labelStyle := t.Renderer.NewStyle().Foreground(t.Secondary).Bold(true)
+	valStyle := t.Renderer.NewStyle().Foreground(t.Base.GetForeground())
 
 	var sb strings.Builder
-
-	// Header
-	sb.WriteString(titleStyle.Render(fmt.Sprintf("Label Health: %s", lh.Label)))
-	sb.WriteString("\n\n")
-
-	// Main Health
-	sb.WriteString(labelStyle.Render("Overall Health: "))
-	sb.WriteString(valueStyle.Render(fmt.Sprintf("%d/100 (%s)", lh.Health, lh.HealthLevel)))
+	sb.WriteString(t.Renderer.NewStyle().Foreground(t.Primary).Bold(true).MarginBottom(1).
+		Render(fmt.Sprintf("Label Health: %s", lh.Label)))
 	sb.WriteString("\n")
 
-	// Stats
+	sb.WriteString(labelStyle.Render("Overall: "))
+	sb.WriteString(valStyle.Render(fmt.Sprintf("%d/100 (%s)", lh.Health, lh.HealthLevel)))
+	sb.WriteString("\n")
+	sb.WriteString(bar(lh.Health))
+	sb.WriteString("\n\n")
+
 	sb.WriteString(labelStyle.Render("Issues: "))
-	sb.WriteString(valueStyle.Render(fmt.Sprintf("%d total (%d open, %d blocked, %d closed)",
-		lh.IssueCount, lh.OpenCount, lh.Blocked, lh.ClosedCount)))
+	sb.WriteString(valStyle.Render(fmt.Sprintf("%d total (%d open, %d blocked, %d closed)", lh.IssueCount, lh.OpenCount, lh.Blocked, lh.ClosedCount)))
 	sb.WriteString("\n\n")
-
-	// Breakdown
-	sb.WriteString(titleStyle.Render("Breakdown"))
-	sb.WriteString("\n")
 
 	sb.WriteString(labelStyle.Render("Velocity: "))
-	sb.WriteString(valueStyle.Render(fmt.Sprintf("%d/100 (Closed: %d/7d, %d/30d)",
-		lh.Velocity.VelocityScore, lh.Velocity.ClosedLast7Days, lh.Velocity.ClosedLast30Days)))
+	sb.WriteString(valStyle.Render(fmt.Sprintf("%d/100 (7d=%d, 30d=%d, avg_close=%.1fd, trend=%s %.1f%%)", lh.Velocity.VelocityScore, lh.Velocity.ClosedLast7Days, lh.Velocity.ClosedLast30Days, lh.Velocity.AvgDaysToClose, lh.Velocity.TrendDirection, lh.Velocity.TrendPercent)))
 	sb.WriteString("\n")
+	sb.WriteString(bar(lh.Velocity.VelocityScore))
+	sb.WriteString("\n\n")
 
 	sb.WriteString(labelStyle.Render("Freshness: "))
-	sb.WriteString(valueStyle.Render(fmt.Sprintf("%d/100 (Stale: %d)",
-		lh.Freshness.FreshnessScore, lh.Freshness.StaleCount)))
+	oldest := "n/a"
+	if !lh.Freshness.OldestOpenIssue.IsZero() {
+		oldest = lh.Freshness.OldestOpenIssue.Format("2006-01-02")
+	}
+	mostRecent := "n/a"
+	if !lh.Freshness.MostRecentUpdate.IsZero() {
+		mostRecent = lh.Freshness.MostRecentUpdate.Format("2006-01-02")
+	}
+	sb.WriteString(valStyle.Render(fmt.Sprintf("%d/100 (stale=%d, oldest_open=%s, most_recent=%s)", lh.Freshness.FreshnessScore, lh.Freshness.StaleCount, oldest, mostRecent)))
 	sb.WriteString("\n")
+	sb.WriteString(bar(lh.Freshness.FreshnessScore))
+	sb.WriteString("\n\n")
 
 	sb.WriteString(labelStyle.Render("Flow: "))
-	sb.WriteString(valueStyle.Render(fmt.Sprintf("%d/100 (Incoming: %d, Outgoing: %d)",
-		lh.Flow.FlowScore, lh.Flow.IncomingDeps, lh.Flow.OutgoingDeps)))
+	sb.WriteString(valStyle.Render(fmt.Sprintf("%d/100 (in=%d from %v, out=%d to %v, external blocked=%d blocking=%d)", lh.Flow.FlowScore, lh.Flow.IncomingDeps, lh.Flow.IncomingLabels, lh.Flow.OutgoingDeps, lh.Flow.OutgoingLabels, lh.Flow.BlockedByExternal, lh.Flow.BlockingExternal)))
 	sb.WriteString("\n")
+	sb.WriteString(bar(lh.Flow.FlowScore))
+	sb.WriteString("\n\n")
 
 	sb.WriteString(labelStyle.Render("Criticality: "))
-	sb.WriteString(valueStyle.Render(fmt.Sprintf("%d/100 (Critical path: %d)",
-		lh.Criticality.CriticalityScore, lh.Criticality.CriticalPathCount)))
+	sb.WriteString(valStyle.Render(fmt.Sprintf("%d/100 (avgPR=%.3f, maxBW=%.3f, crit_path=%d, bottlenecks=%d)", lh.Criticality.CriticalityScore, lh.Criticality.AvgPageRank, lh.Criticality.MaxBetweenness, lh.Criticality.CriticalPathCount, lh.Criticality.BottleneckCount)))
+	sb.WriteString("\n")
+	sb.WriteString(bar(lh.Criticality.CriticalityScore))
+	sb.WriteString("\n\n")
+
+	sb.WriteString(labelStyle.Render("Blocked issues: "))
+	sb.WriteString(valStyle.Render(fmt.Sprintf("%d", lh.Blocked)))
 	sb.WriteString("\n")
 
-	// Footer hint
-	sb.WriteString("\n")
-	sb.WriteString(t.Renderer.NewStyle().Foreground(t.Secondary).Italic(true).Render("Press Esc to close"))
+	sb.WriteString(lipgloss.NewStyle().Foreground(t.Subtext).Render("esc/q/enter to close; enter on table selects label"))
 
 	content := boxStyle.Render(sb.String())
 
