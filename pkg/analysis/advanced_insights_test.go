@@ -206,7 +206,6 @@ func TestPendingFeatureStatus(t *testing.T) {
 		name   string
 		status FeatureStatus
 	}{
-		{"ParallelCut", insights.ParallelCut.Status},
 		{"ParallelGain", insights.ParallelGain.Status},
 	}
 
@@ -237,6 +236,11 @@ func TestPendingFeatureStatus(t *testing.T) {
 	// KPaths should be available (bv-153)
 	if insights.KPaths.Status.State != "available" {
 		t.Errorf("KPaths: expected available state, got %s", insights.KPaths.Status.State)
+	}
+
+	// ParallelCut should be available (bv-154)
+	if insights.ParallelCut.Status.State != "available" {
+		t.Errorf("ParallelCut: expected available state, got %s", insights.ParallelCut.Status.State)
 	}
 }
 
@@ -855,5 +859,274 @@ func TestKPathsDiamondGraph(t *testing.T) {
 	}
 	if path.IssueIDs[path.Length-1] != "D" {
 		t.Errorf("expected path to end with D, got %s", path.IssueIDs[path.Length-1])
+	}
+}
+
+// Parallel Cut Tests (bv-154)
+
+func TestParallelCutEmpty(t *testing.T) {
+	an := NewAnalyzer([]model.Issue{})
+	cfg := DefaultAdvancedInsightsConfig()
+	insights := an.GenerateAdvancedInsights(cfg)
+
+	if insights.ParallelCut == nil {
+		t.Fatal("expected ParallelCut result")
+	}
+	if insights.ParallelCut.Status.State != "available" {
+		t.Errorf("expected available state, got %s", insights.ParallelCut.Status.State)
+	}
+	if len(insights.ParallelCut.Suggestions) != 0 {
+		t.Error("expected no suggestions for empty graph")
+	}
+}
+
+func TestParallelCutNoEdges(t *testing.T) {
+	// Disconnected nodes with no dependencies
+	issues := []model.Issue{
+		{ID: "A", Status: model.StatusOpen},
+		{ID: "B", Status: model.StatusOpen},
+		{ID: "C", Status: model.StatusOpen},
+	}
+
+	an := NewAnalyzer(issues)
+	cfg := DefaultAdvancedInsightsConfig()
+	insights := an.GenerateAdvancedInsights(cfg)
+
+	if insights.ParallelCut.Status.State != "available" {
+		t.Errorf("expected available state, got %s", insights.ParallelCut.Status.State)
+	}
+	// No edges means no parallel gain opportunities
+	if len(insights.ParallelCut.Suggestions) != 0 {
+		t.Errorf("expected no suggestions for graph with no edges, got %d", len(insights.ParallelCut.Suggestions))
+	}
+}
+
+func TestParallelCutLinearChainNoGain(t *testing.T) {
+	// Chain: A -> B -> C -> D
+	// Completing any node only unblocks 1 dependent (gain = 0)
+	issues := []model.Issue{
+		{ID: "A", Status: model.StatusOpen},
+		{ID: "B", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "A", Type: model.DepBlocks}}},
+		{ID: "C", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "B", Type: model.DepBlocks}}},
+		{ID: "D", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "C", Type: model.DepBlocks}}},
+	}
+
+	an := NewAnalyzer(issues)
+	cfg := DefaultAdvancedInsightsConfig()
+	insights := an.GenerateAdvancedInsights(cfg)
+
+	// No node has gain > 0 in a simple chain (each completion only unblocks 1)
+	if len(insights.ParallelCut.Suggestions) != 0 {
+		t.Errorf("expected no suggestions for linear chain, got %d", len(insights.ParallelCut.Suggestions))
+	}
+}
+
+func TestParallelCutForkHasGain(t *testing.T) {
+	// Fork: Hub -> A, Hub -> B, Hub -> C
+	// Completing Hub unblocks 3 nodes, gain = 3 - 1 = 2
+	issues := []model.Issue{
+		{ID: "Hub", Status: model.StatusOpen},
+		{ID: "A", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub", Type: model.DepBlocks}}},
+		{ID: "B", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub", Type: model.DepBlocks}}},
+		{ID: "C", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub", Type: model.DepBlocks}}},
+	}
+
+	an := NewAnalyzer(issues)
+	cfg := DefaultAdvancedInsightsConfig()
+	insights := an.GenerateAdvancedInsights(cfg)
+
+	if insights.ParallelCut == nil {
+		t.Fatal("expected ParallelCut result")
+	}
+	if len(insights.ParallelCut.Suggestions) < 1 {
+		t.Fatal("expected at least 1 suggestion")
+	}
+
+	// Hub should be the suggestion with gain = 2 (3 unblocked - 1 = 2)
+	suggestion := insights.ParallelCut.Suggestions[0]
+	if suggestion.ID != "Hub" {
+		t.Errorf("expected Hub as suggestion, got %s", suggestion.ID)
+	}
+	if suggestion.ParallelGain != 2 {
+		t.Errorf("expected parallel gain 2, got %d", suggestion.ParallelGain)
+	}
+	if len(suggestion.EnabledTracks) != 3 {
+		t.Errorf("expected 3 enabled tracks, got %d", len(suggestion.EnabledTracks))
+	}
+}
+
+func TestParallelCutMultipleForks(t *testing.T) {
+	// Two forks: Hub1 -> {A, B}, Hub2 -> {X, Y, Z}
+	// Hub1 has gain = 2 - 1 = 1
+	// Hub2 has gain = 3 - 1 = 2
+	issues := []model.Issue{
+		{ID: "Hub1", Status: model.StatusOpen},
+		{ID: "A", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub1", Type: model.DepBlocks}}},
+		{ID: "B", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub1", Type: model.DepBlocks}}},
+		{ID: "Hub2", Status: model.StatusOpen},
+		{ID: "X", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub2", Type: model.DepBlocks}}},
+		{ID: "Y", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub2", Type: model.DepBlocks}}},
+		{ID: "Z", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub2", Type: model.DepBlocks}}},
+	}
+
+	an := NewAnalyzer(issues)
+	cfg := DefaultAdvancedInsightsConfig()
+	insights := an.GenerateAdvancedInsights(cfg)
+
+	if len(insights.ParallelCut.Suggestions) < 2 {
+		t.Fatalf("expected at least 2 suggestions, got %d", len(insights.ParallelCut.Suggestions))
+	}
+
+	// Hub2 should be first (higher gain)
+	if insights.ParallelCut.Suggestions[0].ID != "Hub2" {
+		t.Errorf("expected Hub2 first (higher gain), got %s", insights.ParallelCut.Suggestions[0].ID)
+	}
+	if insights.ParallelCut.Suggestions[0].ParallelGain != 2 {
+		t.Errorf("expected Hub2 gain 2, got %d", insights.ParallelCut.Suggestions[0].ParallelGain)
+	}
+
+	// Hub1 should be second
+	if insights.ParallelCut.Suggestions[1].ID != "Hub1" {
+		t.Errorf("expected Hub1 second, got %s", insights.ParallelCut.Suggestions[1].ID)
+	}
+	if insights.ParallelCut.Suggestions[1].ParallelGain != 1 {
+		t.Errorf("expected Hub1 gain 1, got %d", insights.ParallelCut.Suggestions[1].ParallelGain)
+	}
+}
+
+func TestParallelCutDeterministic(t *testing.T) {
+	// Run multiple times and verify deterministic output
+	issues := []model.Issue{
+		{ID: "Hub", Status: model.StatusOpen},
+		{ID: "A", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub", Type: model.DepBlocks}}},
+		{ID: "B", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub", Type: model.DepBlocks}}},
+		{ID: "C", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub", Type: model.DepBlocks}}},
+	}
+
+	cfg := DefaultAdvancedInsightsConfig()
+	var firstResult *ParallelCutResult
+
+	for i := 0; i < 5; i++ {
+		an := NewAnalyzer(issues)
+		insights := an.GenerateAdvancedInsights(cfg)
+
+		if firstResult == nil {
+			firstResult = insights.ParallelCut
+			continue
+		}
+
+		// Compare with first result
+		if len(insights.ParallelCut.Suggestions) != len(firstResult.Suggestions) {
+			t.Fatalf("iteration %d: suggestion count changed from %d to %d",
+				i, len(firstResult.Suggestions), len(insights.ParallelCut.Suggestions))
+		}
+		for j, s := range insights.ParallelCut.Suggestions {
+			if s.ID != firstResult.Suggestions[j].ID {
+				t.Errorf("iteration %d: suggestion %d ID changed from %s to %s",
+					i, j, firstResult.Suggestions[j].ID, s.ID)
+			}
+			if s.ParallelGain != firstResult.Suggestions[j].ParallelGain {
+				t.Errorf("iteration %d: suggestion %d gain changed", i, j)
+			}
+		}
+	}
+}
+
+func TestParallelCutCapping(t *testing.T) {
+	// Create many forks to test capping
+	issues := []model.Issue{
+		{ID: "H1", Status: model.StatusOpen},
+		{ID: "A1", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "H1", Type: model.DepBlocks}}},
+		{ID: "A2", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "H1", Type: model.DepBlocks}}},
+		{ID: "H2", Status: model.StatusOpen},
+		{ID: "B1", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "H2", Type: model.DepBlocks}}},
+		{ID: "B2", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "H2", Type: model.DepBlocks}}},
+		{ID: "H3", Status: model.StatusOpen},
+		{ID: "C1", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "H3", Type: model.DepBlocks}}},
+		{ID: "C2", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "H3", Type: model.DepBlocks}}},
+		{ID: "H4", Status: model.StatusOpen},
+		{ID: "D1", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "H4", Type: model.DepBlocks}}},
+		{ID: "D2", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "H4", Type: model.DepBlocks}}},
+	}
+
+	an := NewAnalyzer(issues)
+	cfg := DefaultAdvancedInsightsConfig()
+	cfg.ParallelCutLimit = 2 // Cap at 2
+	insights := an.GenerateAdvancedInsights(cfg)
+
+	if len(insights.ParallelCut.Suggestions) > 2 {
+		t.Errorf("expected at most 2 suggestions (capped), got %d", len(insights.ParallelCut.Suggestions))
+	}
+}
+
+func TestParallelCutClosedIssuesIgnored(t *testing.T) {
+	// Closed issues should not be considered
+	issues := []model.Issue{
+		{ID: "Hub", Status: model.StatusClosed}, // Closed - should be ignored
+		{ID: "A", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub", Type: model.DepBlocks}}},
+		{ID: "B", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub", Type: model.DepBlocks}}},
+	}
+
+	an := NewAnalyzer(issues)
+	cfg := DefaultAdvancedInsightsConfig()
+	insights := an.GenerateAdvancedInsights(cfg)
+
+	// Hub is closed, so no suggestions involving it
+	for _, s := range insights.ParallelCut.Suggestions {
+		if s.ID == "Hub" {
+			t.Error("closed issue Hub should not appear in suggestions")
+		}
+	}
+}
+
+func TestParallelCutMaxParallel(t *testing.T) {
+	// Fork: Hub -> A, B, C
+	// Initial actionable: 1 (Hub)
+	// After completing Hub: 3 actionable (A, B, C)
+	// Max parallel should be 1 + 2 = 3
+	issues := []model.Issue{
+		{ID: "Hub", Status: model.StatusOpen},
+		{ID: "A", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub", Type: model.DepBlocks}}},
+		{ID: "B", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub", Type: model.DepBlocks}}},
+		{ID: "C", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "Hub", Type: model.DepBlocks}}},
+	}
+
+	an := NewAnalyzer(issues)
+	cfg := DefaultAdvancedInsightsConfig()
+	insights := an.GenerateAdvancedInsights(cfg)
+
+	// MaxParallel = currentActionable (1) + sum of gains (2) = 3
+	if insights.ParallelCut.MaxParallel != 3 {
+		t.Errorf("expected MaxParallel 3, got %d", insights.ParallelCut.MaxParallel)
+	}
+}
+
+func TestParallelCutDiamondNoGain(t *testing.T) {
+	// Diamond: A -> B, A -> C, B -> D, C -> D
+	// Completing A unblocks B and C (2 items, gain = 1)
+	// Completing B or C alone doesn't unblock D (needs both)
+	issues := []model.Issue{
+		{ID: "A", Status: model.StatusOpen},
+		{ID: "B", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "A", Type: model.DepBlocks}}},
+		{ID: "C", Status: model.StatusOpen, Dependencies: []*model.Dependency{{DependsOnID: "A", Type: model.DepBlocks}}},
+		{ID: "D", Status: model.StatusOpen, Dependencies: []*model.Dependency{
+			{DependsOnID: "B", Type: model.DepBlocks},
+			{DependsOnID: "C", Type: model.DepBlocks},
+		}},
+	}
+
+	an := NewAnalyzer(issues)
+	cfg := DefaultAdvancedInsightsConfig()
+	insights := an.GenerateAdvancedInsights(cfg)
+
+	// A should have gain = 1 (unblocks B and C, 2 - 1 = 1)
+	if len(insights.ParallelCut.Suggestions) < 1 {
+		t.Fatal("expected at least 1 suggestion")
+	}
+	if insights.ParallelCut.Suggestions[0].ID != "A" {
+		t.Errorf("expected A as suggestion, got %s", insights.ParallelCut.Suggestions[0].ID)
+	}
+	if insights.ParallelCut.Suggestions[0].ParallelGain != 1 {
+		t.Errorf("expected gain 1, got %d", insights.ParallelCut.Suggestions[0].ParallelGain)
 	}
 }

@@ -206,14 +206,8 @@ func (a *Analyzer) GenerateAdvancedInsights(config AdvancedInsightsConfig) *Adva
 	// K-Paths - top k longest/critical paths through the dependency graph (bv-153)
 	insights.KPaths = a.generateKPaths(config.KPathsLimit, config.PathLengthCap)
 
-	// Parallel Cut - placeholder until bv-154 implements
-	insights.ParallelCut = &ParallelCutResult{
-		Status: FeatureStatus{
-			State:  "pending",
-			Reason: "Awaiting implementation (bv-154)",
-		},
-		HowToUse: DefaultUsageHints()["parallel_cut"],
-	}
+	// Parallel Cut - suggestions for maximizing parallel work (bv-154)
+	insights.ParallelCut = a.generateParallelCut(config.ParallelCutLimit)
 
 	// Parallel Gain - placeholder until bv-129 implements
 	insights.ParallelGain = &ParallelGainResult{
@@ -699,8 +693,8 @@ func (a *Analyzer) generateKPaths(k int, pathLengthCap int) *KPathsResult {
 	}
 
 	// DP for longest path distances and predecessor tracking
-	dist := make([]int, n)     // dist[i] = length of longest path ending at i
-	pred := make([]int, n)     // pred[i] = predecessor on longest path (-1 if source)
+	dist := make([]int, n) // dist[i] = length of longest path ending at i
+	pred := make([]int, n) // pred[i] = predecessor on longest path (-1 if source)
 	for i := range pred {
 		pred[i] = -1
 	}
@@ -812,3 +806,149 @@ func (a *Analyzer) generateKPaths(k int, pathLengthCap int) *KPathsResult {
 	}
 }
 
+// generateParallelCut finds nodes that maximize parallel work opportunities (bv-154).
+// A node has positive "parallel gain" if completing it would unblock more than one
+// dependent, increasing the number of items that can be worked on in parallel.
+func (a *Analyzer) generateParallelCut(limit int) *ParallelCutResult {
+	if limit <= 0 {
+		limit = 5
+	}
+
+	// Build map of non-closed issues
+	openIssues := make(map[string]bool)
+	for id, issue := range a.issueMap {
+		if issue.Status != model.StatusClosed {
+			openIssues[id] = true
+		}
+	}
+
+	if len(openIssues) == 0 {
+		return &ParallelCutResult{
+			Status: FeatureStatus{
+				State:  "available",
+				Count:  0,
+				Reason: "No open issues",
+			},
+			MaxParallel: 0,
+			HowToUse:    DefaultUsageHints()["parallel_cut"],
+		}
+	}
+
+	// Build dependency graph: blockerOf[A] = list of issues that A blocks
+	blockerOf := make(map[string][]string)
+	blockedBy := make(map[string][]string) // blockedBy[B] = list of issues blocking B
+
+	for id, issue := range a.issueMap {
+		if !openIssues[id] {
+			continue
+		}
+		for _, dep := range issue.Dependencies {
+			if dep == nil || dep.Type != model.DepBlocks {
+				continue
+			}
+			if openIssues[dep.DependsOnID] {
+				blockerOf[dep.DependsOnID] = append(blockerOf[dep.DependsOnID], id)
+				blockedBy[id] = append(blockedBy[id], dep.DependsOnID)
+			}
+		}
+	}
+
+	// Count current actionable issues (no open blockers)
+	currentActionable := 0
+	for id := range openIssues {
+		if len(blockedBy[id]) == 0 {
+			currentActionable++
+		}
+	}
+
+	// Calculate parallel gain for each open issue
+	type parallelCandidate struct {
+		id            string
+		parallelGain  int
+		newActionable int
+		enabledTracks []string
+	}
+	var candidates []parallelCandidate
+
+	for id := range openIssues {
+		// Count how many dependents would become actionable if this issue is completed
+		var newlyActionable []string
+
+		for _, depID := range blockerOf[id] {
+			if !openIssues[depID] {
+				continue
+			}
+			// Check if all other blockers of depID are closed (or would be after removing id)
+			allOthersClosed := true
+			for _, blockerID := range blockedBy[depID] {
+				if blockerID != id && openIssues[blockerID] {
+					allOthersClosed = false
+					break
+				}
+			}
+			if allOthersClosed {
+				newlyActionable = append(newlyActionable, depID)
+			}
+		}
+
+		// Parallel gain = newly actionable - 1 (the completed node leaves the actionable pool)
+		// Positive gain means net increase in parallel work opportunities
+		parallelGain := len(newlyActionable) - 1
+
+		if parallelGain > 0 {
+			sort.Strings(newlyActionable)
+			candidates = append(candidates, parallelCandidate{
+				id:            id,
+				parallelGain:  parallelGain,
+				newActionable: len(newlyActionable),
+				enabledTracks: newlyActionable,
+			})
+		}
+	}
+
+	// Sort by parallel gain descending, then by ID for determinism
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].parallelGain != candidates[j].parallelGain {
+			return candidates[i].parallelGain > candidates[j].parallelGain
+		}
+		return candidates[i].id < candidates[j].id
+	})
+
+	// Cap to limit
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
+	// Build suggestions
+	suggestions := make([]ParallelCutItem, len(candidates))
+	for i, c := range candidates {
+		title := ""
+		if issue, ok := a.issueMap[c.id]; ok {
+			title = issue.Title
+		}
+		suggestions[i] = ParallelCutItem{
+			ID:            c.id,
+			Title:         title,
+			ParallelGain:  c.parallelGain,
+			EnabledTracks: c.enabledTracks,
+		}
+	}
+
+	// Calculate max parallel achievable
+	maxParallel := currentActionable
+	for _, c := range candidates {
+		maxParallel += c.parallelGain
+	}
+
+	return &ParallelCutResult{
+		Status: FeatureStatus{
+			State:   "available",
+			Count:   len(suggestions),
+			Capped:  len(suggestions) >= limit && len(candidates) >= limit,
+			Limited: len(candidates),
+		},
+		Suggestions: suggestions,
+		MaxParallel: maxParallel,
+		HowToUse:    DefaultUsageHints()["parallel_cut"],
+	}
+}
