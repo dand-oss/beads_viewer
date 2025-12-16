@@ -3136,11 +3136,128 @@ export function getTimeTravelState() {
     };
 }
 
-// Export time-travel functions (bv-z38b)
-export {
-    initTimeTravel,
-    startTimeTravel,
-    stopTimeTravel,
-    isTimeTravelActive,
-    getTimeTravelState
-};
+/**
+ * Transform robot-history format to timeline format for time-travel
+ * @param {Object} robotHistory - Output from bv --robot-history
+ * @returns {Object} Timeline format { commits: [...] }
+ */
+export function transformHistoryToTimeline(robotHistory) {
+    if (!robotHistory || !robotHistory.histories) {
+        console.warn('[TimeTravel] Invalid robot-history format');
+        return null;
+    }
+
+    // Collect all events across all beads
+    const allEvents = [];
+
+    Object.values(robotHistory.histories).forEach(beadHistory => {
+        if (!beadHistory.events) return;
+
+        beadHistory.events.forEach(event => {
+            allEvents.push({
+                beadId: event.bead_id,
+                eventType: event.event_type,
+                timestamp: event.timestamp,
+                commitSha: event.commit_sha,
+                commitMessage: event.commit_message || ''
+            });
+        });
+    });
+
+    // Sort events by timestamp
+    allEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    // Group events by commit SHA
+    const commitMap = new Map();
+    allEvents.forEach(event => {
+        const sha = event.commitSha;
+        if (!commitMap.has(sha)) {
+            commitMap.set(sha, {
+                sha: sha,
+                date: event.timestamp,
+                message: event.commitMessage,
+                beads_added: [],
+                beads_closed: [],
+                beads_modified: []
+            });
+        }
+
+        const commit = commitMap.get(sha);
+        if (event.eventType === 'created') {
+            commit.beads_added.push(event.beadId);
+        } else if (event.eventType === 'closed') {
+            commit.beads_closed.push(event.beadId);
+        } else if (event.eventType === 'modified') {
+            commit.beads_modified.push(event.beadId);
+        }
+    });
+
+    // Convert to array sorted by date
+    const commits = [...commitMap.values()].sort((a, b) =>
+        new Date(a.date) - new Date(b.date)
+    );
+
+    return { commits };
+}
+
+/**
+ * Generate demo history data for testing time-travel
+ * @param {Array} issues - Array of issue objects
+ * @param {number} numCommits - Number of commits to simulate
+ * @returns {Object} Timeline format { commits: [...] }
+ */
+export function generateDemoHistory(issues, numCommits = 20) {
+    if (!issues || issues.length === 0) return null;
+
+    const commits = [];
+    const issueIds = issues.map(i => i.id);
+    const addedSet = new Set();
+    const closedSet = new Set();
+
+    // Start date: 30 days ago
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+
+    // Issues to add per commit (distribute evenly)
+    const issuesPerCommit = Math.ceil(issueIds.length / numCommits);
+
+    for (let i = 0; i < numCommits; i++) {
+        const commitDate = new Date(startDate);
+        commitDate.setDate(startDate.getDate() + (i * 30 / numCommits));
+
+        const commit = {
+            sha: `demo${i.toString().padStart(4, '0')}`,
+            date: commitDate.toISOString(),
+            message: `Demo commit ${i + 1}`,
+            beads_added: [],
+            beads_closed: []
+        };
+
+        // Add some issues
+        for (let j = 0; j < issuesPerCommit && addedSet.size < issueIds.length; j++) {
+            const idx = addedSet.size;
+            if (idx < issueIds.length) {
+                const issueId = issueIds[idx];
+                commit.beads_added.push(issueId);
+                addedSet.add(issueId);
+            }
+        }
+
+        // Close some previously added issues (after first few commits)
+        if (i > 3 && i % 3 === 0) {
+            const addedArr = [...addedSet].filter(id => !closedSet.has(id));
+            const toClose = addedArr.slice(0, Math.floor(addedArr.length * 0.2));
+            toClose.forEach(id => {
+                const issue = issues.find(iss => iss.id === id);
+                if (issue && issue.status === 'closed') {
+                    commit.beads_closed.push(id);
+                    closedSet.add(id);
+                }
+            });
+        }
+
+        commits.push(commit);
+    }
+
+    return { commits };
+}

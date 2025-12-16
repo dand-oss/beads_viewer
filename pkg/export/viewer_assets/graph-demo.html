@@ -463,6 +463,10 @@
             </div>
 
             <div class="toolbar-group">
+                <button id="btn-timetravel" title="Time-travel through history (t)">⏱️ History</button>
+            </div>
+
+            <div class="toolbar-group">
                 <button id="btn-fit" title="Fit all nodes">Fit</button>
                 <button id="btn-reset" title="Reset view (r)">Reset</button>
             </div>
@@ -560,6 +564,8 @@
                         <kbd>1</kbd>-<kbd>4</kbd> View modes<br>
                         <kbd>c</kbd> Critical path<br>
                         <kbd>y</kbd> Cycles<br>
+                        <kbd>t</kbd> Time-travel<br>
+                        <kbd>Space</kbd> Play/pause<br>
                         <kbd>r</kbd> Reset view<br>
                         <kbd>Esc</kbd> Clear selection<br>
                         <kbd>Ctrl</kbd>+<kbd>F</kbd> Search
@@ -597,6 +603,9 @@
     <!-- Main application -->
     <script type="module">
         import * as Graph from './graph.js';
+
+        // Store issues for time-travel demo
+        let demoIssues = [];
 
         // Demo data generator
         function generateDemoData(nodeCount = 50) {
@@ -648,10 +657,18 @@
 
                 // Load demo data
                 const { issues, dependencies } = generateDemoData(60);
+                demoIssues = issues; // Store for time-travel
                 const graphData = Graph.loadData(issues, dependencies);
 
                 // Update stats
                 updateStats(graphData);
+
+                // Initialize time-travel with demo history
+                const demoHistory = Graph.generateDemoHistory(issues, 25);
+                if (demoHistory) {
+                    Graph.initTimeTravel(demoHistory);
+                    console.log('[Demo] Time-travel initialized with', demoHistory.commits.length, 'commits');
+                }
 
                 // Hide loading
                 document.getElementById('loading').classList.add('hidden');
@@ -742,6 +759,26 @@
 
             document.getElementById('btn-reset').addEventListener('click', () => {
                 Graph.resetView();
+            });
+
+            // Time-travel button
+            document.getElementById('btn-timetravel').addEventListener('click', () => {
+                if (Graph.isTimeTravelActive()) {
+                    Graph.stopTimeTravel();
+                    document.getElementById('btn-timetravel').classList.remove('active');
+                } else {
+                    Graph.startTimeTravel();
+                    document.getElementById('btn-timetravel').classList.add('active');
+                }
+            });
+
+            // Time-travel events
+            document.addEventListener('bv-graph:timeTravelStart', () => {
+                document.getElementById('btn-timetravel').classList.add('active');
+            });
+
+            document.addEventListener('bv-graph:timeTravelStop', () => {
+                document.getElementById('btn-timetravel').classList.remove('active');
             });
 
             // Event listeners
