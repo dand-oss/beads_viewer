@@ -989,9 +989,9 @@ func (a *Analyzer) computePhase2(stats *GraphStats, config AnalysisConfig) {
 			for id, score := range result.Scores {
 				localBetweenness[a.nodeToID[id]] = score
 			}
-			// Track if approximation was used (update stats.Config, not local copy)
+			// Track if approximation was used
 			if result.Mode == BetweennessApproximate {
-				stats.Config.BetweennessIsApproximate = true
+				betweennessIsApprox = true
 			}
 		case <-timer.C:
 			// Timeout - skip (leave empty)
@@ -1060,10 +1060,9 @@ func (a *Analyzer) computePhase2(stats *GraphStats, config AnalysisConfig) {
 			case cycles := <-cyclesDone:
 				timer.Stop()
 				cyclesToProcess := cycles
-				truncated := false
 				if len(cyclesToProcess) > maxCycles {
 					cyclesToProcess = cyclesToProcess[:maxCycles]
-					truncated = true
+					cyclesTruncated = true
 				}
 
 				for _, cycle := range cyclesToProcess {
@@ -1074,9 +1073,7 @@ func (a *Analyzer) computePhase2(stats *GraphStats, config AnalysisConfig) {
 					localCycles = append(localCycles, cycleIDs)
 				}
 
-				if truncated {
-					localCycles = append(localCycles, []string{"...", "CYCLES_TRUNCATED"})
-				}
+
 			case <-timer.C:
 				localCycles = [][]string{{"CYCLE_DETECTION_TIMEOUT"}}
 			}
