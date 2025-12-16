@@ -1393,7 +1393,9 @@ function beadsApp() {
     diagnostics: DIAGNOSTICS, // Reference to global diagnostics
     toasts: [],              // Toast notifications
     view: 'dashboard',
-    darkMode: localStorage.getItem('darkMode') === 'true',
+    darkMode: localStorage.getItem('darkMode') !== null
+      ? localStorage.getItem('darkMode') === 'true'
+      : window.matchMedia('(prefers-color-scheme: dark)').matches,
 
     // Data
     stats: {},
@@ -1464,6 +1466,18 @@ function beadsApp() {
       if (this.darkMode) {
         document.documentElement.classList.add('dark');
       }
+
+      // Listen for system preference changes (only if no stored preference)
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+        if (localStorage.getItem('darkMode') === null) {
+          this.darkMode = e.matches;
+          document.documentElement.classList.toggle('dark', this.darkMode);
+          // Re-render Mermaid graphs if visible
+          if (this.showDepGraph && this.selectedIssue) {
+            this.renderDepGraph();
+          }
+        }
+      });
 
       // Listen for toast events
       window.addEventListener('show-toast', (e) => {
@@ -1854,6 +1868,16 @@ function beadsApp() {
       this.darkMode = !this.darkMode;
       localStorage.setItem('darkMode', this.darkMode);
       document.documentElement.classList.toggle('dark', this.darkMode);
+
+      // Re-initialize Mermaid with new theme
+      if (window.reinitializeMermaid) {
+        window.reinitializeMermaid();
+      }
+
+      // Re-render visible Mermaid graph if any
+      if (this.showDepGraph && this.selectedIssue) {
+        this.renderDepGraph();
+      }
     },
 
     // ========================================================================

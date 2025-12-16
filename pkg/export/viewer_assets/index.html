@@ -5,6 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Beads Viewer</title>
 
+  <!-- Early theme detection - MUST be first to prevent flash -->
+  <script>
+    (function() {
+      const stored = localStorage.getItem('darkMode');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      // Use stored preference, or fall back to system preference
+      if (stored === 'true' || (stored === null && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+
   <!-- Security: Content Security Policy -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
@@ -16,10 +28,9 @@
     worker-src 'self' blob:;
   ">
 
-  <!-- Mermaid theming for dark mode -->
+  <!-- Mermaid container styling -->
   <style>
     .mermaid-container { min-height: 150px; }
-    .dark .mermaid-container svg { filter: invert(1) hue-rotate(180deg); }
   </style>
 
   <!-- Fonts -->
@@ -1358,12 +1369,30 @@
   <!-- Mermaid.js for dependency graphs -->
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script>
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'neutral',
-      flowchart: { curve: 'basis', padding: 10 },
-      securityLevel: 'strict',
-    });
+    // Initialize Mermaid with theme based on dark mode state
+    function getMermaidConfig() {
+      const dark = document.documentElement.classList.contains('dark');
+      return {
+        startOnLoad: false,
+        theme: dark ? 'dark' : 'neutral',
+        flowchart: { curve: 'basis', padding: 10 },
+        securityLevel: 'strict',
+        themeVariables: dark ? {
+          primaryColor: '#4f46e5',
+          primaryTextColor: '#f9fafb',
+          primaryBorderColor: '#6366f1',
+          lineColor: '#6b7280',
+          secondaryColor: '#1f2937',
+          tertiaryColor: '#374151'
+        } : {}
+      };
+    }
+    mermaid.initialize(getMermaidConfig());
+
+    // Expose for theme toggle re-initialization
+    window.reinitializeMermaid = function() {
+      mermaid.initialize(getMermaidConfig());
+    };
   </script>
 
   <!-- Viewer application -->

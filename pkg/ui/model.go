@@ -3472,7 +3472,7 @@ func GetTypeIconMD(t string) string {
 	case "task":
 		return "📋"
 	case "epic":
-		return "🏔️"
+		return "🚀" // Use rocket instead of mountain - VS-16 variation selector causes width issues
 	case "chore":
 		return "🧹"
 	default:
