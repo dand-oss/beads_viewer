@@ -305,14 +305,14 @@ func TestTutorialCurrentPageID(t *testing.T) {
 	m := newTestTutorialModel()
 
 	id := m.CurrentPageID()
-	if id != "intro" {
-		t.Errorf("Expected 'intro', got %s", id)
+	if id != "intro-welcome" {
+		t.Errorf("Expected 'intro-welcome', got %s", id)
 	}
 
 	m.NextPage()
 	id = m.CurrentPageID()
-	if id != "navigation" {
-		t.Errorf("Expected 'navigation', got %s", id)
+	if id != "intro-philosophy" {
+		t.Errorf("Expected 'intro-philosophy', got %s", id)
 	}
 }
 
@@ -463,8 +463,8 @@ func TestDefaultTutorialPages(t *testing.T) {
 		t.Error("Should have default pages")
 	}
 
-	// Check required pages exist
-	requiredIDs := []string{"intro", "navigation", "keyboard-reference"}
+	// Check required pages exist (using new page IDs from bv-kdv2)
+	requiredIDs := []string{"intro-welcome", "intro-philosophy", "ref-keyboard"}
 	for _, id := range requiredIDs {
 		found := false
 		for _, page := range pages {
@@ -537,7 +537,8 @@ func TestTutorialViewHeader(t *testing.T) {
 
 func TestTutorialViewFooter(t *testing.T) {
 	m := newTestTutorialModel()
-	m.SetSize(80, 24)
+	// Use large dimensions to ensure footer isn't clipped
+	m.SetSize(100, 60)
 
 	view := m.View()
 
@@ -551,7 +552,8 @@ func TestTutorialViewFooter(t *testing.T) {
 	if !strings.Contains(view, "TOC") {
 		t.Error("View should contain TOC hint")
 	}
-	if !strings.Contains(view, "Esc") {
+	// Footer shows "q close" not "Esc close"
+	if !strings.Contains(view, "close") {
 		t.Error("View should contain close hint")
 	}
 }
@@ -592,17 +594,18 @@ func TestTutorialTOCProgressCheckmarks(t *testing.T) {
 
 func TestTutorialPageTitleDisplay(t *testing.T) {
 	m := newTestTutorialModel()
-	m.SetSize(80, 24)
+	// Use large height to ensure content isn't clipped
+	m.SetSize(100, 60)
 
 	view := m.View()
 
-	// Should show current page title
-	if !strings.Contains(view, "Welcome to bv") {
+	// Should show current page title (now "Welcome" from bv-kdv2)
+	if !strings.Contains(view, "Welcome") {
 		t.Error("View should contain current page title")
 	}
 
-	// Should show section info
-	if !strings.Contains(view, "Getting Started") {
+	// Should show section info (now "Introduction" from bv-kdv2)
+	if !strings.Contains(view, "Introduction") {
 		t.Error("View should contain section name")
 	}
 }
@@ -656,26 +659,26 @@ func TestTutorialSetSizeUpdatesMarkdownRenderer(t *testing.T) {
 
 func TestTutorialMarkdownWithCodeBlocks(t *testing.T) {
 	m := newTestTutorialModel()
-	m.SetSize(80, 50) // Larger to show more content
+	m.SetSize(100, 60) // Larger to show more content
 
-	// Navigate to the "Working with Beads" page which has code blocks
-	m.JumpToPage(5) // Index 5 is "working-with-beads"
+	// Navigate to the "AI Agent Integration" page which has code blocks
+	m.JumpToPage(8) // Index 8 is "advanced-ai"
 
 	view := m.View()
 
 	// Code blocks should be present (content includes bash commands)
 	// The exact rendering depends on Glamour, but the content should include command text
-	if !strings.Contains(view, "bd") {
-		t.Error("View should contain 'bd' command from code blocks")
+	if !strings.Contains(view, "robot") {
+		t.Error("View should contain 'robot' command from code blocks")
 	}
 }
 
 func TestTutorialMarkdownWithTables(t *testing.T) {
 	m := newTestTutorialModel()
-	m.SetSize(100, 40) // Wide enough for tables
+	m.SetSize(100, 60) // Wide and tall enough for tables
 
-	// Navigate to navigation page which has tables
-	m.JumpToPage(1) // Index 1 is "navigation"
+	// Navigate to Quick Start page which has tables
+	m.JumpToPage(3) // Index 3 is "intro-quickstart"
 
 	view := m.View()
 
@@ -823,7 +826,8 @@ func TestTutorialTOCCursorIndicator(t *testing.T) {
 
 func TestTutorialContextSensitiveFooter(t *testing.T) {
 	m := newTestTutorialModel()
-	m.SetSize(80, 24)
+	// Use very large dimensions to ensure footer isn't clipped by MaxHeight
+	m.SetSize(120, 100)
 
 	// Content focus footer
 	view := m.View()

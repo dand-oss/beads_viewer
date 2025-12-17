@@ -705,56 +705,63 @@ func (m TutorialModel) CenterTutorial(termWidth, termHeight int) string {
 }
 
 // defaultTutorialPages returns the built-in tutorial content.
-// This is placeholder content - real content will come from bv-kdv2, bv-sbib, etc.
+// Content organized by section - see bv-kdv2, bv-sbib, bv-36wz, etc.
 func defaultTutorialPages() []TutorialPage {
 	return []TutorialPage{
+		// =============================================================
+		// INTRODUCTION & PHILOSOPHY (bv-kdv2)
+		// =============================================================
 		{
-			ID:      "intro",
-			Title:   "Welcome to bv",
-			Section: "Getting Started",
-			Content: `Welcome to **beads_viewer** (bv)!
-
-bv is a powerful *TUI* (Terminal User Interface) for managing your project's issues using the **Beads** format.
-
-This tutorial will guide you through:
-
-- Navigating the interface
-- Understanding views
-- Working with beads (issues)
-- Advanced features
-
-> Press **→** or **n** to continue to the next page.`,
+			ID:      "intro-welcome",
+			Title:   "Welcome",
+			Section: "Introduction",
+			Content: introWelcomeContent,
 		},
 		{
-			ID:      "navigation",
-			Title:   "Basic Navigation",
-			Section: "Getting Started",
-			Content: `## Navigation Basics
-
-Use these keys to navigate:
-
-| Key | Action |
-|-----|--------|
-| **j/k** or **↓/↑** | Move up/down in lists |
-| **Enter** | Select/open item |
-| **Esc** | Go back/close overlay |
-| **q** | Quit bv |
-| **?** | Show help overlay |
-
-### Views
-
-| Key | View |
-|-----|------|
-| **1** | List view (default) |
-| **2** | Board view (Kanban) |
-| **3** | Graph view (dependencies) |
-| **4** | Labels view |
-| **5** | History view |
-
-> Press **→** to continue.`,
+			ID:      "intro-philosophy",
+			Title:   "The Beads Philosophy",
+			Section: "Introduction",
+			Content: introPhilosophyContent,
 		},
 		{
-			ID:       "list-view",
+			ID:      "intro-audience",
+			Title:   "Who Is This For?",
+			Section: "Introduction",
+			Content: introAudienceContent,
+		},
+		{
+			ID:      "intro-quickstart",
+			Title:   "Quick Start",
+			Section: "Introduction",
+			Content: introQuickstartContent,
+		},
+
+		// =============================================================
+		// CORE CONCEPTS (placeholder - bv-sbib)
+		// =============================================================
+		{
+			ID:      "concepts-beads",
+			Title:   "What Are Beads?",
+			Section: "Core Concepts",
+			Content: `## What Are Beads?
+
+Each **bead** is an issue or task in your project:
+
+- **ID** - Unique identifier (e.g., ` + "`bv-abc123`" + `)
+- **Title** - Short description
+- **Status** - open, in_progress, blocked, closed
+- **Priority** - P0 (critical) to P4 (backlog)
+- **Type** - bug, feature, task, epic, chore
+- **Dependencies** - What blocks or is blocked by this
+
+> More detailed content coming in bv-sbib.`,
+		},
+
+		// =============================================================
+		// VIEWS & NAVIGATION (placeholder - bv-36wz)
+		// =============================================================
+		{
+			ID:       "views-list",
 			Title:    "List View",
 			Section:  "Views",
 			Contexts: []string{"list"},
@@ -762,142 +769,242 @@ Use these keys to navigate:
 
 The **List view** shows all your beads in a filterable list.
 
-### Filtering
+### Navigation
+| Key | Action |
+|-----|--------|
+| **j/k** | Move up/down |
+| **Enter** | View details |
+| **g/G** | Jump to start/end |
 
+### Filtering
 | Key | Filter |
 |-----|--------|
-| **o** | Open issues only |
-| **c** | Closed issues only |
-| **r** | Ready issues (no blockers) |
+| **o** | Open issues |
+| **c** | Closed issues |
+| **r** | Ready (no blockers) |
 | **a** | All issues |
 
-### Sorting
-
-- **s** - Cycle sort mode (priority, created, updated)
-- **S** - Reverse sort order
-
-### Search
-
-Press **/** to start searching, then **n/N** for next/previous match.`,
+> More detailed content coming in bv-36wz.`,
 		},
 		{
-			ID:       "board-view",
+			ID:       "views-board",
 			Title:    "Board View",
 			Section:  "Views",
 			Contexts: []string{"board"},
 			Content: `## Board View
 
-The **Board view** shows a Kanban-style board with columns for each status:
-
-1. **Open** - New issues
-2. **In Progress** - Being worked on
-3. **Blocked** - Waiting on dependencies
-4. **Closed** - Completed
+Kanban-style columns: **Open**, **In Progress**, **Blocked**, **Closed**.
 
 ### Navigation
-
 | Key | Action |
 |-----|--------|
-| **h/l** or **←/→** | Move between columns |
-| **j/k** or **↓/↑** | Move within column |
-| **Enter** | View issue details |
-| **m** | Move issue to different status |`,
+| **h/l** | Move between columns |
+| **j/k** | Move within column |
+| **Enter** | View details |
+
+> More detailed content coming in bv-36wz.`,
 		},
 		{
-			ID:       "graph-view",
+			ID:       "views-graph",
 			Title:    "Graph View",
 			Section:  "Views",
 			Contexts: []string{"graph"},
 			Content: `## Graph View
 
-The **Graph view** visualizes dependencies between beads.
+Visualizes dependencies between beads.
 
-### Reading the Graph
-
-- Arrow **→** points TO the dependency
-- *Highlighted* node is currently selected
-
-### Navigation
+- Arrows point TO dependencies (A → B means A blocks B)
+- Highlighted node is selected
 
 | Key | Action |
 |-----|--------|
-| **j/k** | Move between nodes |
+| **j/k** | Navigate nodes |
 | **Enter** | Select node |
-| **f** | Focus on selected node's subgraph |`,
+
+> More detailed content coming in bv-36wz.`,
 		},
+
+		// =============================================================
+		// ADVANCED FEATURES (placeholder - bv-19gf)
+		// =============================================================
 		{
-			ID:      "working-with-beads",
-			Title:   "Working with Beads",
-			Section: "Core Concepts",
-			Content: `## Working with Beads
-
-Each bead (issue) has:
-
-- **ID** - Unique identifier (e.g., ` + "`bv-abc123`" + `)
-- **Title** - Short description
-- **Status** - open, in_progress, blocked, closed
-- **Priority** - P0 (critical) to P4 (backlog)
-- **Type** - bug, feature, task, epic, chore
-- **Dependencies** - What it blocks/is blocked by
-
-### Creating Beads
-
-` + "```bash\nbd create --title=\"Fix login bug\" --type=bug --priority=1\n```" + `
-
-### Updating Beads
-
-` + "```bash\nbd update bv-abc123 --status=in_progress\n```",
-		},
-		{
-			ID:      "ai-integration",
+			ID:      "advanced-ai",
 			Title:   "AI Agent Integration",
 			Section: "Advanced",
 			Content: `## AI Agent Integration
 
-bv integrates seamlessly with **AI coding agents**.
+bv works with **AI coding agents** through robot mode:
 
-### Robot Mode
+` + "```bash\nbv --robot-triage   # Prioritized recommendations\nbv --robot-next     # Top priority item\nbv --robot-plan     # Parallel execution tracks\n```" + `
 
-` + "```bash\nbv --robot-triage   # Prioritized work recommendations\nbv --robot-next     # Single top priority item\nbv --robot-plan     # Parallel execution tracks\n```" + `
+See ` + "`AGENTS.md`" + ` for the complete AI integration guide.
 
-### AGENTS.md
-
-The ` + "`AGENTS.md`" + ` file in your project helps AI agents understand your workflow and use bv effectively.
-
-> See *AGENTS.md* for the complete AI integration guide.`,
+> More detailed content coming in bv-19gf.`,
 		},
+
+		// =============================================================
+		// REFERENCE
+		// =============================================================
 		{
-			ID:      "keyboard-reference",
+			ID:      "ref-keyboard",
 			Title:   "Keyboard Reference",
 			Section: "Reference",
 			Content: `## Quick Keyboard Reference
 
 ### Global
-
 | Key | Action |
 |-----|--------|
-| **?** or **F1** | Help overlay |
+| **?** | Help overlay |
 | **q** | Quit |
-| **Esc** | Close overlay / go back |
+| **Esc** | Close/go back |
 | **1-5** | Switch views |
 
 ### Navigation
-
 | Key | Action |
 |-----|--------|
 | **j/k** | Move down/up |
 | **h/l** | Move left/right |
-| **g/G** | Go to top/bottom |
+| **g/G** | Top/bottom |
 | **Enter** | Select |
 
 ### Filtering
-
 | Key | Action |
 |-----|--------|
-| **/** | Search |
-| **o/c/r/a** | Filter by status |
+| **/** | Fuzzy search |
+| **~** | Semantic search |
+| **o/c/r/a** | Status filter |
 
-> For complete reference, press **?** in any view.`,
+> Press **?** in any view for context help.`,
 		},
 	}
 }
+
+// =============================================================================
+// INTRODUCTION & PHILOSOPHY CONTENT (bv-kdv2)
+// =============================================================================
+
+// introWelcomeContent is Page 1 of the Introduction section.
+const introWelcomeContent = `## Welcome to beads_viewer
+
+` + "```" + `
+    ╭──────────────────────────────────────╮
+    │      beads_viewer (bv)               │
+    │  Issue tracking that lives in code   │
+    ╰──────────────────────────────────────╯
+` + "```" + `
+
+**The problem:** You're deep in flow, coding away, when you need to check an issue.
+You switch to a browser, navigate to your issue tracker, lose context,
+and break your concentration.
+
+**The solution:** ` + "`bv`" + ` brings issue tracking *into your terminal*, where you already work.
+No browser tabs. No context switching. No cloud dependencies.
+
+### The 30-Second Value Proposition
+
+1. **Issues live in your repo** — version controlled, diffable, greppable
+2. **Works offline** — no internet required, no accounts to manage
+3. **AI-native** — designed for both humans and coding agents
+4. **Zero dependencies** — just a single binary and your git repo
+
+> Press **→** or **Space** to continue.`
+
+// introPhilosophyContent is Page 2 of the Introduction section.
+const introPhilosophyContent = `## The Beads Philosophy
+
+Why "beads"? Think of git commits as **beads on a string** — each one a
+discrete, meaningful step in your project's history.
+
+Issues are beads too. They're snapshots of work: what needs doing, what's
+in progress, what's complete. They belong *with your code*, not in some
+external system.
+
+### Core Principles
+
+**1. Issues as First-Class Citizens**
+Your ` + "`.beads/`" + ` directory is just as important as your ` + "`src/`" + `.
+Issues get the same git treatment as code: branching, merging, history.
+
+**2. No External Dependencies**
+No servers to run. No accounts to create. No API keys to manage.
+If you have git and a terminal, you have everything you need.
+
+**3. Diffable and Greppable**
+Issues are stored as plain JSONL. You can ` + "`git diff`" + ` your backlog.
+You can ` + "`grep`" + ` for patterns across all issues.
+
+**4. Human and Agent Readable**
+The same data works for both humans (via ` + "`bv`" + `) and AI agents (via ` + "`--robot-*`" + ` flags).
+
+> Press **→** to continue.`
+
+// introAudienceContent is Page 3 of the Introduction section.
+const introAudienceContent = `## Who Is This For?
+
+### Solo Developers
+
+Managing personal projects? Keep your TODO lists organized without
+the overhead of heavyweight tools. Everything stays in your repo,
+backs up with your code, and travels wherever you push.
+
+### Small Teams
+
+Want lightweight issue tracking without the subscription fees?
+Share your ` + "`.beads/`" + ` directory through git. Everyone sees the same
+state. No sync issues. No "who has the latest?"
+
+### AI Coding Agents
+
+This is where bv shines. AI agents like Claude, Cursor, and Codex
+need structured task management. The ` + "`--robot-*`" + ` flags output
+machine-readable formats perfect for agent consumption:
+
+` + "```bash\nbv --robot-triage    # What should I work on?\nbv --robot-plan      # How can work be parallelized?\n```" + `
+
+### Anyone Tired of Context-Switching
+
+If you've ever lost your train of thought switching between your
+editor and a web-based issue tracker, bv is for you. Stay in the
+terminal. Stay in flow.
+
+> Press **→** to continue.`
+
+// introQuickstartContent is Page 4 of the Introduction section.
+const introQuickstartContent = `## Quick Start
+
+You're already running ` + "`bv`" + ` — you're ahead of the game!
+
+### Basic Navigation
+
+| Key | Action |
+|-----|--------|
+| **j / k** | Move down / up |
+| **Enter** | Open issue details |
+| **Esc** | Close overlay / go back |
+| **q** | Quit bv |
+
+### Switching Views
+
+| Key | View |
+|-----|------|
+| **1** | List (default) |
+| **2** | Board (Kanban) |
+| **3** | Graph (dependencies) |
+| **4** | Labels |
+| **5** | History |
+
+### Getting Help
+
+| Key | What You Get |
+|-----|--------------|
+| **?** | Quick help overlay |
+| **Space** (in help) | This tutorial |
+| **` + "`" + `** (backtick) | Jump to tutorial |
+| **~** (tilde) | Context-sensitive help |
+
+### Next Steps
+
+Try pressing **t** to see the Table of Contents for this tutorial.
+Or press **q** to exit and start exploring!
+
+> **Tip:** Press **?** anytime you need a quick reference.`
