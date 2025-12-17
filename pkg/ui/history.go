@@ -86,6 +86,9 @@ type HistoryModel struct {
 	selectedRelatedBead  int               // Index into selected commit's BeadIDs
 	gitScrollOffset      int               // For scrolling the commit list
 
+	// Three-pane middle panel scroll state (bv-xrfh)
+	middleScrollOffset int // Scroll offset for middle pane content
+
 	// Filters
 	authorFilter  string  // Filter by author (empty = all)
 	minConfidence float64 // Minimum confidence threshold (0-1)
@@ -257,12 +260,17 @@ func (h *HistoryModel) MoveUp() {
 		if h.selectedBead > 0 {
 			h.selectedBead--
 			h.selectedCommit = 0
+			h.middleScrollOffset = 0 // Reset middle scroll when changing bead (bv-xrfh)
 			h.ensureBeadVisible()
 		}
 	} else {
-		// In detail pane, move to previous commit
+		// In middle or detail pane, move to previous commit
 		if h.selectedCommit > 0 {
 			h.selectedCommit--
+			// Update middle pane scroll if in three-pane layout (bv-xrfh)
+			if h.focused == historyFocusMiddle && h.selectedBead < len(h.histories) {
+				h.ensureMiddleScrollVisible(h.selectedCommit, len(h.histories[h.selectedBead].Commits))
+			}
 		}
 	}
 }
@@ -273,14 +281,19 @@ func (h *HistoryModel) MoveDown() {
 		if h.selectedBead < len(h.histories)-1 {
 			h.selectedBead++
 			h.selectedCommit = 0
+			h.middleScrollOffset = 0 // Reset middle scroll when changing bead (bv-xrfh)
 			h.ensureBeadVisible()
 		}
 	} else {
-		// In detail pane, move to next commit
+		// In middle or detail pane, move to next commit
 		if h.selectedBead < len(h.histories) {
 			commits := h.histories[h.selectedBead].Commits
 			if h.selectedCommit < len(commits)-1 {
 				h.selectedCommit++
+				// Update middle pane scroll if in three-pane layout (bv-xrfh)
+				if h.focused == historyFocusMiddle {
+					h.ensureMiddleScrollVisible(h.selectedCommit, len(commits))
+				}
 			}
 		}
 	}
@@ -708,12 +721,20 @@ func (h *HistoryModel) MoveUpGit() {
 		if h.selectedGitCommit > 0 {
 			h.selectedGitCommit--
 			h.selectedRelatedBead = 0
+			h.middleScrollOffset = 0 // Reset middle scroll when changing commit (bv-xrfh)
 			h.ensureGitCommitVisible()
 		}
 	} else {
-		// In detail pane, move to previous related bead
+		// In middle or detail pane, move to previous related bead
 		if h.selectedRelatedBead > 0 {
 			h.selectedRelatedBead--
+			// Update middle pane scroll if in three-pane layout (bv-xrfh)
+			if h.focused == historyFocusMiddle {
+				commit := h.SelectedGitCommit()
+				if commit != nil {
+					h.ensureMiddleScrollVisible(h.selectedRelatedBead, len(commit.BeadIDs))
+				}
+			}
 		}
 	}
 }
@@ -725,14 +746,19 @@ func (h *HistoryModel) MoveDownGit() {
 		if h.selectedGitCommit < len(commits)-1 {
 			h.selectedGitCommit++
 			h.selectedRelatedBead = 0
+			h.middleScrollOffset = 0 // Reset middle scroll when changing commit (bv-xrfh)
 			h.ensureGitCommitVisible()
 		}
 	} else {
-		// In detail pane, move to next related bead
+		// In middle or detail pane, move to next related bead
 		if h.selectedGitCommit < len(commits) {
 			beadCount := len(commits[h.selectedGitCommit].BeadIDs)
 			if h.selectedRelatedBead < beadCount-1 {
 				h.selectedRelatedBead++
+				// Update middle pane scroll if in three-pane layout (bv-xrfh)
+				if h.focused == historyFocusMiddle {
+					h.ensureMiddleScrollVisible(h.selectedRelatedBead, beadCount)
+				}
 			}
 		}
 	}
@@ -800,6 +826,30 @@ func (h *HistoryModel) ensureBeadVisible() {
 		h.scrollOffset = h.selectedBead
 	} else if h.selectedBead >= h.scrollOffset+visibleItems {
 		h.scrollOffset = h.selectedBead - visibleItems + 1
+	}
+}
+
+// ensureMiddleScrollVisible adjusts middle pane scroll offset (bv-xrfh)
+func (h *HistoryModel) ensureMiddleScrollVisible(selectedIdx, itemCount int) {
+	// Use similar height calculation as middle pane (accounting for header/border)
+	visibleItems := h.height - 7 // Header, separator, border padding
+	if visibleItems < 1 {
+		visibleItems = 1
+	}
+
+	if selectedIdx < h.middleScrollOffset {
+		h.middleScrollOffset = selectedIdx
+	} else if selectedIdx >= h.middleScrollOffset+visibleItems {
+		h.middleScrollOffset = selectedIdx - visibleItems + 1
+	}
+
+	// Clamp to valid range
+	maxScroll := itemCount - visibleItems
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if h.middleScrollOffset > maxScroll {
+		h.middleScrollOffset = maxScroll
 	}
 }
 
@@ -1608,7 +1658,18 @@ func (h *HistoryModel) renderCommitMiddlePanel(width, height int) string {
 		visibleItems = 1
 	}
 
-	for i := 0; i < len(hist.Commits) && i < visibleItems; i++ {
+	// Use scroll offset for middle pane (bv-xrfh fix)
+	totalCommits := len(hist.Commits)
+	startIdx := h.middleScrollOffset
+	if startIdx >= totalCommits {
+		startIdx = 0
+	}
+	endIdx := startIdx + visibleItems
+	if endIdx > totalCommits {
+		endIdx = totalCommits
+	}
+
+	for i := startIdx; i < endIdx; i++ {
 		commit := hist.Commits[i]
 		isSelected := i == h.selectedCommit && h.focused == historyFocusMiddle
 
@@ -1633,6 +1694,17 @@ func (h *HistoryModel) renderCommitMiddlePanel(width, height int) string {
 
 		line := fmt.Sprintf("%s%s %s", indicator, shaStyle.Render(commit.ShortSHA), msg)
 		lines = append(lines, line)
+	}
+
+	// Add scroll indicator if needed (bv-xrfh)
+	if totalCommits > visibleItems {
+		scrollInfo := t.Renderer.NewStyle().Foreground(t.Muted).Italic(true)
+		scrollPct := 0
+		maxScroll := totalCommits - visibleItems
+		if maxScroll > 0 {
+			scrollPct = h.middleScrollOffset * 100 / maxScroll
+		}
+		lines = append(lines, scrollInfo.Render(fmt.Sprintf("↕ %d/%d (%d%%)", endIdx, totalCommits, scrollPct)))
 	}
 
 	for len(lines) < height-2 {
@@ -1678,7 +1750,18 @@ func (h *HistoryModel) renderGitBeadListPanel(width, height int) string {
 		visibleItems = 1
 	}
 
-	for i := 0; i < len(commit.BeadIDs) && i < visibleItems; i++ {
+	// Use scroll offset for middle pane (bv-xrfh fix)
+	totalBeads := len(commit.BeadIDs)
+	startIdx := h.middleScrollOffset
+	if startIdx >= totalBeads {
+		startIdx = 0
+	}
+	endIdx := startIdx + visibleItems
+	if endIdx > totalBeads {
+		endIdx = totalBeads
+	}
+
+	for i := startIdx; i < endIdx; i++ {
 		beadID := commit.BeadIDs[i]
 		isSelected := i == h.selectedRelatedBead && h.focused == historyFocusMiddle
 
@@ -1717,6 +1800,17 @@ func (h *HistoryModel) renderGitBeadListPanel(width, height int) string {
 
 		beadLine := fmt.Sprintf("%s%s %s", indicator, statusIcon, beadStyle.Render(title))
 		lines = append(lines, beadLine)
+	}
+
+	// Add scroll indicator if needed (bv-xrfh)
+	if totalBeads > visibleItems {
+		scrollInfo := t.Renderer.NewStyle().Foreground(t.Muted).Italic(true)
+		scrollPct := 0
+		maxScroll := totalBeads - visibleItems
+		if maxScroll > 0 {
+			scrollPct = h.middleScrollOffset * 100 / maxScroll
+		}
+		lines = append(lines, scrollInfo.Render(fmt.Sprintf("↕ %d/%d (%d%%)", endIdx, totalBeads, scrollPct)))
 	}
 
 	for len(lines) < height-2 {
