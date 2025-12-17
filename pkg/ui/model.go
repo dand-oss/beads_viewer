@@ -2986,6 +2986,7 @@ func (m *Model) renderHelpOverlay() string {
 		{"j/k", "Navigate items"},
 		{"e", "Explanations"},
 		{"x", "Calc details"},
+		{"m", "Toggle heatmap"},
 		{"Enter", "Jump to issue"},
 	}
 
