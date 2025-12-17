@@ -49,10 +49,23 @@ func NewMarkdownRendererWithTheme(width int, theme Theme) *MarkdownRenderer {
 	isDark := lipgloss.HasDarkBackground()
 	styleConfig := buildStyleFromTheme(theme, isDark)
 
-	renderer, _ := glamour.NewTermRenderer(
+	renderer, err := glamour.NewTermRenderer(
 		glamour.WithStyles(styleConfig),
 		glamour.WithWordWrap(width),
 	)
+	if err != nil {
+		// Fall back to built-in style if custom theme fails
+		var styleName string
+		if isDark {
+			styleName = "dracula"
+		} else {
+			styleName = "light"
+		}
+		renderer, _ = glamour.NewTermRenderer(
+			glamour.WithStylePath(styleName),
+			glamour.WithWordWrap(width),
+		)
+	}
 
 	return &MarkdownRenderer{
 		renderer: renderer,
@@ -112,7 +125,7 @@ func (mr *MarkdownRenderer) SetWidth(width int) {
 // SetWidthWithTheme updates width and recreates renderer with theme colors.
 // This also updates the stored theme for future SetWidth calls.
 // If width is the same but theme differs, the renderer is still recreated with the new theme.
-// Width and theme are only updated if the new renderer is created successfully.
+// Falls back to built-in styles if custom theme fails.
 func (mr *MarkdownRenderer) SetWidthWithTheme(width int, theme Theme) {
 	if width <= 0 {
 		return
@@ -121,10 +134,24 @@ func (mr *MarkdownRenderer) SetWidthWithTheme(width int, theme Theme) {
 	// Allow recreation even if width is the same (theme might have changed)
 	styleConfig := buildStyleFromTheme(theme, mr.isDark)
 
-	if r, err := glamour.NewTermRenderer(
+	r, err := glamour.NewTermRenderer(
 		glamour.WithStyles(styleConfig),
 		glamour.WithWordWrap(width),
-	); err == nil {
+	)
+	if err != nil {
+		// Fall back to built-in style if custom theme fails
+		var styleName string
+		if mr.isDark {
+			styleName = "dracula"
+		} else {
+			styleName = "light"
+		}
+		r, _ = glamour.NewTermRenderer(
+			glamour.WithStylePath(styleName),
+			glamour.WithWordWrap(width),
+		)
+	}
+	if r != nil {
 		mr.renderer = r
 		mr.width = width
 		mr.theme = &theme
