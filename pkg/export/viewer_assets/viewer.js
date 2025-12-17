@@ -1075,23 +1075,29 @@ function searchIssues(term, limit = 50) {
 function getStats() {
   const stats = {};
 
-  // Count by status
-  const statusCounts = execQuery(`
-    SELECT status, COUNT(*) as count
-    FROM issue_overview_mv
-    GROUP BY status
-  `);
-  statusCounts.forEach(row => {
-    stats[row.status] = row.count;
-  });
+  try {
+    // Count by status
+    const statusCounts = execQuery(`
+      SELECT status, COUNT(*) as count
+      FROM issue_overview_mv
+      GROUP BY status
+    `);
+    console.log('[Stats] Status counts:', statusCounts);
+    statusCounts.forEach(row => {
+      stats[row.status] = row.count;
+    });
+    console.log('[Stats] Parsed stats:', stats);
+  } catch (err) {
+    console.error('[Stats] Error loading status counts:', err);
+  }
 
   // Count blocked (has blocked_by_ids and status is open/in_progress)
-	  stats.blocked = execScalar(`
-	    SELECT COUNT(*) FROM issue_overview_mv
-	    WHERE blocked_by_ids IS NOT NULL
-	    AND blocked_by_ids <> ''
-	    AND status IN ('open', 'in_progress')
-	  `) || 0;
+  stats.blocked = execScalar(`
+    SELECT COUNT(*) FROM issue_overview_mv
+    WHERE blocked_by_ids IS NOT NULL
+    AND blocked_by_ids <> ''
+    AND status IN ('open', 'in_progress')
+  `) || 0;
 
   // Count actionable (open/in_progress with NO open blockers)
   stats.actionable = execScalar(`
