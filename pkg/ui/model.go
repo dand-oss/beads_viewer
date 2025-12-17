@@ -567,8 +567,8 @@ func NewModel(issues []model.Issue, activeRecipe *recipe.Recipe, beadsPath strin
 	// This avoids blocking startup on expensive graph analysis
 	priorityHints := make(map[string]*analysis.PriorityRecommendation)
 
-	// Compute triage insights (bv-151)
-	triageResult := analysis.ComputeTriage(issues)
+	// Compute triage insights (bv-151) - reuse existing analyzer/stats (bv-runn.12)
+	triageResult := analysis.ComputeTriageFromAnalyzer(analyzer, graphStats, issues, analysis.TriageOptions{}, time.Now())
 	triageScores := make(map[string]float64, len(triageResult.Recommendations))
 	triageReasons := make(map[string]analysis.TriageReasons, len(triageResult.Recommendations))
 	quickWinSet := make(map[string]bool, len(triageResult.QuickWins))
@@ -791,8 +791,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.insightsPanel.SetSize(m.width, bodyHeight)
 		m.graphView.SetIssues(m.issues, &ins)
 
-		// Generate triage for priority panel (bv-91)
-		triage := analysis.ComputeTriage(m.issues)
+		// Generate triage for priority panel (bv-91) - reuse existing analyzer/stats (bv-runn.12)
+		triage := analysis.ComputeTriageFromAnalyzer(m.analyzer, m.analysis, m.issues, analysis.TriageOptions{}, time.Now())
 		m.insightsPanel.SetTopPicks(triage.QuickRef.TopPicks)
 
 		// Set full recommendations with breakdown for priority radar (bv-93)
@@ -1488,8 +1488,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.analysis != nil {
 						ins := m.analysis.GenerateInsights(len(m.issues))
 						m.insightsPanel = NewInsightsModel(ins, m.issueMap, m.theme)
-						// Include priority triage (bv-91)
-						triage := analysis.ComputeTriage(m.issues)
+						// Include priority triage (bv-91) - reuse existing analyzer/stats (bv-runn.12)
+						triage := analysis.ComputeTriageFromAnalyzer(m.analyzer, m.analysis, m.issues, analysis.TriageOptions{}, time.Now())
 						m.insightsPanel.SetTopPicks(triage.QuickRef.TopPicks)
 						// Set full recommendations with breakdown for priority radar (bv-93)
 						dataHash := fmt.Sprintf("v%s@%s#%d", triage.Meta.Version, triage.Meta.GeneratedAt.Format("15:04:05"), triage.Meta.IssueCount)
