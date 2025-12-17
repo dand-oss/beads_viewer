@@ -60,6 +60,7 @@ const (
 	focusSprint      // Sprint dashboard view (bv-161)
 	focusAgentPrompt // AGENTS.md integration prompt (bv-i8dk)
 	focusFlowMatrix  // Cross-label flow matrix view
+	focusTutorial    // Interactive tutorial (bv-8y31)
 )
 
 // SortMode represents the current list sorting mode (bv-3ita)
@@ -377,6 +378,10 @@ type Model struct {
 	showAgentPrompt  bool
 	agentPromptModal AgentPromptModal
 	workDir          string // Working directory for agent file detection
+
+	// Tutorial integration (bv-8y31)
+	showTutorial  bool
+	tutorialModel TutorialModel
 }
 
 // labelCount is a simple label->count pair for display
@@ -786,6 +791,8 @@ func NewModel(issues []model.Issue, activeRecipe *recipe.Recipe, beadsPath strin
 			}
 			return ""
 		}(),
+		// Tutorial integration (bv-8y31)
+		tutorialModel: NewTutorialModel(theme),
 	}
 }
 
@@ -1415,6 +1422,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle tutorial toggle (backtick `) - bv-8y31
+		if msg.String() == "`" && m.list.FilterState() != list.Filtering {
+			m.showTutorial = !m.showTutorial
+			if m.showTutorial {
+				m.showHelp = false // Close help if open
+				m.tutorialModel.SetSize(m.width, m.height)
+				m.focused = focusTutorial
+			} else {
+				m.focused = focusList
+			}
+			return m, nil
+		}
+
 		// Handle shortcuts sidebar toggle (; or F2) - bv-3qi5
 		if (msg.String() == ";" || msg.String() == "f2") && m.list.FilterState() != list.Filtering {
 			m.showShortcutsSidebar = !m.showShortcutsSidebar
@@ -1484,6 +1504,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.focused == focusHelp {
 			m = m.handleHelpKeys(msg)
 			return m, nil
+		}
+
+		// If tutorial is showing, route input to tutorial model (bv-8y31)
+		if m.focused == focusTutorial && m.showTutorial {
+			var tutorialCmd tea.Cmd
+			m.tutorialModel, tutorialCmd = m.tutorialModel.Update(msg)
+			// Check if tutorial wants to close
+			if m.tutorialModel.ShouldClose() {
+				m.showTutorial = false
+				m.focused = focusList
+				m.tutorialModel = NewTutorialModel(m.theme) // Reset for next time
+			}
+			return m, tutorialCmd
 		}
 
 		// Handle time-travel input first (before global keys intercept letters)
@@ -2653,13 +2686,12 @@ func (m Model) handleHelpKeys(msg tea.KeyMsg) Model {
 		m.showHelp = false
 		m.helpScroll = 0
 		m.focused = focusList
-	case " ": // Space opens interactive tutorial (bv-0trk)
+	case " ": // Space opens interactive tutorial (bv-0trk, bv-8y31)
 		m.showHelp = false
 		m.helpScroll = 0
-		// Signal to show tutorial (will be handled by main model integration bv-8y31)
-		// For now, we set a flag that the main Update can check
-		m.focused = focusList
-		// TODO(bv-8y31): m.showTutorial = true; m.tutorialModel = NewTutorialModel(m.theme)
+		m.showTutorial = true
+		m.tutorialModel.SetSize(m.width, m.height)
+		m.focused = focusTutorial
 	default:
 		// Any other key dismisses help
 		m.showHelp = false
@@ -2700,6 +2732,9 @@ func (m Model) View() string {
 		body = m.labelPicker.View()
 	} else if m.showHelp {
 		body = m.renderHelpOverlay()
+	} else if m.showTutorial {
+		// Interactive tutorial (bv-8y31) - full screen overlay
+		body = m.tutorialModel.View()
 	} else if m.focused == focusInsights {
 		body = m.insightsPanel.View()
 	} else if m.focused == focusFlowMatrix {
