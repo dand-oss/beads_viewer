@@ -312,9 +312,9 @@ func TestTriageInProgressAction(t *testing.T) {
 		daysOld        int
 		expectedAction string
 	}{
-		{"fresh in_progress", 5, "Start work on this issue"},               // < 9 days
-		{"moderate in_progress", 12, "Start work on this issue"},           // > 9 days, < 14 days (new threshold)
-		{"stale in_progress", 20, "Check if this is stuck and needs help"}, // > 14 days
+		{"fresh in_progress", 5, "Continue work on this issue"},            // < 7 days - in_progress gets "Continue"
+		{"moderate in_progress", 12, "Continue work on this issue"},        // 7-14 days - in_progress gets "Continue"
+		{"stale in_progress", 20, "Check if this is stuck and needs help"}, // > 14 days - check if stuck
 	}
 
 	for _, tt := range tests {
