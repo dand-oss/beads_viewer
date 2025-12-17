@@ -3,6 +3,7 @@ package export
 import (
 	"fmt"
 	"image/color"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -349,7 +350,11 @@ func renderSVG(opts GraphSnapshotOptions, layout layoutResult) error {
 	}
 	defer file.Close()
 
-	canvas := svg.New(file)
+	return renderSVGToWriter(file, layout)
+}
+
+func renderSVGToWriter(w io.Writer, layout layoutResult) error {
+	canvas := svg.New(w)
 	canvas.Start(layout.Width, layout.Height)
 	canvas.Rect(0, 0, layout.Width, layout.Height, fmt.Sprintf("fill:%s", css(colorBackdrop)))
 	canvas.Roundrect(16, 16, layout.Width-32, int(layout.Header-24), 10, 10, fmt.Sprintf("fill:%s", css(colorHeaderBG)))
