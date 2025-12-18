@@ -183,6 +183,9 @@ func (b *BoardModel) SetIssues(issues []model.Issue) {
 		b.issueMap[issues[i].ID] = &issues[i]
 	}
 
+	// Clear search state - stale matches could reference invalid positions (bv-yg39)
+	b.CancelSearch()
+
 	// Sanitize selection to prevent out-of-bounds
 	for i := 0; i < 4; i++ {
 		if b.selectedRow[i] >= len(b.columns[i]) {

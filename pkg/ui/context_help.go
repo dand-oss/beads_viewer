@@ -146,8 +146,7 @@ const contextHelpBoard = `## Board View
   Ctrl+j/k  Scroll detail panel
   y         Copy issue ID
   Enter     View issue details
-
-Press 1 to return to List view`
+  Esc       Return to List view`
 
 const contextHelpInsights = `## Insights Panel
 
