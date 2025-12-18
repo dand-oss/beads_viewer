@@ -146,15 +146,15 @@ func (m TutorialModel) handleContentKeys(msg tea.KeyMsg) TutorialModel {
 			m.scrollOffset--
 		}
 
-	// Half-page scrolling
+	// Half-page scrolling (use same overhead as renderContent)
 	case "ctrl+d":
-		visibleHeight := m.height - 10
+		visibleHeight := m.height - 11
 		if visibleHeight < 5 {
 			visibleHeight = 5
 		}
 		m.scrollOffset += visibleHeight / 2
 	case "ctrl+u":
-		visibleHeight := m.height - 10
+		visibleHeight := m.height - 11
 		if visibleHeight < 5 {
 			visibleHeight = 5
 		}
@@ -260,7 +260,7 @@ func (m TutorialModel) View() string {
 		pageTitle += sectionStyle.Render(" — " + currentPage.Section)
 	}
 	b.WriteString(pageTitle)
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	// Content area (with optional TOC)
 	if m.tocVisible {
@@ -273,7 +273,7 @@ func (m TutorialModel) View() string {
 		b.WriteString(content)
 	}
 
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	// Footer with navigation hints
 	footer := m.renderFooter(len(pages))
@@ -333,11 +333,17 @@ func (m TutorialModel) renderHeader(page TutorialPage, totalPages int) string {
 	return headerContent
 }
 
-// renderContent renders the page content with Glamour markdown and scroll handling.
+// renderContent renders the page content with native lipgloss components or Glamour markdown.
 func (m TutorialModel) renderContent(page TutorialPage, width int) string {
 	r := m.theme.Renderer
 
-	// Render markdown content using Glamour
+	// Check if we have a structured page for this ID (preferred)
+	if structuredPage := getStructuredPage(page.ID); structuredPage != nil {
+		// Use native lipgloss component rendering
+		return m.renderStructuredContent(*structuredPage, width)
+	}
+
+	// Fallback to markdown rendering for unconverted pages
 	var renderedContent string
 	if m.markdownRenderer != nil {
 		rendered, err := m.markdownRenderer.Render(page.Content)
@@ -354,8 +360,29 @@ func (m TutorialModel) renderContent(page TutorialPage, width int) string {
 	// Split rendered content into lines for scrolling
 	lines := strings.Split(renderedContent, "\n")
 
+	// Compress runs of 3+ blank lines into 2 blank lines max
+	// This helps with glamour sometimes adding excessive whitespace
+	var compressedLines []string
+	blankCount := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			blankCount++
+			if blankCount <= 2 {
+				compressedLines = append(compressedLines, line)
+			}
+		} else {
+			blankCount = 0
+			compressedLines = append(compressedLines, line)
+		}
+	}
+	lines = compressedLines
+
 	// Calculate visible lines based on height
-	visibleHeight := m.height - 10 // header, footer, padding
+	// Overhead: border (2) + padding (2) + header (1) + separator (1) + title (1) +
+	//           title margin (1) + footer (1) = 9 lines
+	// Plus 1-2 for scroll indicators that may be added
+	visibleHeight := m.height - 11
 	if visibleHeight < 5 {
 		visibleHeight = 5
 	}
@@ -379,13 +406,59 @@ func (m TutorialModel) renderContent(page TutorialPage, width int) string {
 	// Join visible lines (already styled by Glamour)
 	content := strings.Join(visibleLines, "\n")
 
-	// Add scroll indicators
+	// Add scroll indicators (these are accounted for in the height calculation)
 	if m.scrollOffset > 0 {
 		scrollUpHint := r.NewStyle().Foreground(m.theme.Muted).Render("↑ more above")
 		content = scrollUpHint + "\n" + content
 	}
 	if endLine < len(lines) {
 		scrollDownHint := r.NewStyle().Foreground(m.theme.Muted).Render("↓ more below")
+		content = content + "\n" + scrollDownHint
+	}
+
+	return content
+}
+
+// renderStructuredContent renders a structured tutorial page with native lipgloss components.
+func (m TutorialModel) renderStructuredContent(page StructuredTutorialPage, width int) string {
+	// Render all elements using native lipgloss components
+	renderedContent := RenderStructuredPage(page, m.theme, width)
+
+	// Split into lines for scrolling
+	lines := strings.Split(renderedContent, "\n")
+
+	// Calculate visible lines based on height
+	visibleHeight := m.height - 11
+	if visibleHeight < 5 {
+		visibleHeight = 5
+	}
+
+	// Clamp scroll offset
+	maxScroll := len(lines) - visibleHeight
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if m.scrollOffset > maxScroll {
+		m.scrollOffset = maxScroll
+	}
+
+	// Get visible lines
+	endLine := m.scrollOffset + visibleHeight
+	if endLine > len(lines) {
+		endLine = len(lines)
+	}
+	visibleLines := lines[m.scrollOffset:endLine]
+
+	// Join visible lines
+	content := strings.Join(visibleLines, "\n")
+
+	// Add scroll indicators
+	if m.scrollOffset > 0 {
+		scrollUpHint := m.theme.Renderer.NewStyle().Foreground(m.theme.Muted).Render("↑ more above")
+		content = scrollUpHint + "\n" + content
+	}
+	if endLine < len(lines) {
+		scrollDownHint := m.theme.Renderer.NewStyle().Foreground(m.theme.Muted).Render("↓ more below")
 		content = content + "\n" + scrollDownHint
 	}
 
