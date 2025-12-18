@@ -21,6 +21,10 @@ type BoardModel struct {
 	selectedRow  [4]int // Store selection for each column
 	theme        Theme
 
+	// Swimlane grouping mode (bv-wjs0)
+	swimLaneMode SwimLaneMode
+	allIssues    []model.Issue // Store all issues for re-grouping on mode change
+
 	// Reverse dependency index: maps issue ID -> slice of issue IDs it blocks (bv-1daf)
 	blocksIndex map[string][]string
 
@@ -56,6 +60,18 @@ const (
 	ColBlocked    = 2
 	ColClosed     = 3
 )
+
+// SwimLaneMode determines how cards are grouped into columns (bv-wjs0)
+type SwimLaneMode int
+
+const (
+	SwimByStatus   SwimLaneMode = iota // Default: Open | In Progress | Blocked | Closed
+	SwimByPriority                     // P0 Critical | P1 High | P2 Medium | P3+ Other
+	SwimByType                         // Bug | Feature | Task | Epic
+)
+
+// SwimLaneModeCount is the total number of swimlane modes for cycling
+const SwimLaneModeCount = 3
 
 // sortIssuesByPriorityAndDate sorts issues by priority (ascending) then by creation date (descending)
 func sortIssuesByPriorityAndDate(issues []model.Issue) {
@@ -103,28 +119,129 @@ func buildBlocksIndex(issues []model.Issue) map[string][]string {
 	return index
 }
 
-// NewBoardModel creates a new Kanban board from the given issues
-func NewBoardModel(issues []model.Issue, theme Theme) BoardModel {
+// groupIssuesByMode distributes issues into 4 columns based on swimlane mode (bv-wjs0)
+func groupIssuesByMode(issues []model.Issue, mode SwimLaneMode) [4][]model.Issue {
 	var cols [4][]model.Issue
 
-	// Distribute issues into columns by status
 	for _, issue := range issues {
-		switch issue.Status {
-		case model.StatusOpen:
-			cols[ColOpen] = append(cols[ColOpen], issue)
-		case model.StatusInProgress:
-			cols[ColInProgress] = append(cols[ColInProgress], issue)
-		case model.StatusBlocked:
-			cols[ColBlocked] = append(cols[ColBlocked], issue)
-		case model.StatusClosed:
-			cols[ColClosed] = append(cols[ColClosed], issue)
+		var colIdx int
+		switch mode {
+		case SwimByStatus:
+			// Default: Open | In Progress | Blocked | Closed
+			switch issue.Status {
+			case model.StatusOpen:
+				colIdx = 0
+			case model.StatusInProgress:
+				colIdx = 1
+			case model.StatusBlocked:
+				colIdx = 2
+			case model.StatusClosed:
+				colIdx = 3
+			default:
+				colIdx = 0
+			}
+		case SwimByPriority:
+			// P0 Critical | P1 High | P2 Medium | P3+ Other
+			switch {
+			case issue.Priority == 0:
+				colIdx = 0 // Critical
+			case issue.Priority == 1:
+				colIdx = 1 // High
+			case issue.Priority == 2:
+				colIdx = 2 // Medium
+			default:
+				colIdx = 3 // P3+ Other
+			}
+		case SwimByType:
+			// Bug | Feature | Task | Epic
+			switch issue.IssueType {
+			case model.TypeBug:
+				colIdx = 0
+			case model.TypeFeature:
+				colIdx = 1
+			case model.TypeTask:
+				colIdx = 2
+			case model.TypeEpic:
+				colIdx = 3
+			default:
+				colIdx = 2 // Default to Task
+			}
 		}
+		cols[colIdx] = append(cols[colIdx], issue)
 	}
 
 	// Sort each column
 	for i := 0; i < 4; i++ {
 		sortIssuesByPriorityAndDate(cols[i])
 	}
+
+	return cols
+}
+
+// GetSwimLaneModeName returns the display name for the current swimlane mode (bv-wjs0)
+func (b *BoardModel) GetSwimLaneModeName() string {
+	switch b.swimLaneMode {
+	case SwimByStatus:
+		return "Status"
+	case SwimByPriority:
+		return "Priority"
+	case SwimByType:
+		return "Type"
+	default:
+		return "Status"
+	}
+}
+
+// GetSwimLaneMode returns the current swimlane mode (bv-wjs0)
+func (b *BoardModel) GetSwimLaneMode() SwimLaneMode {
+	return b.swimLaneMode
+}
+
+// CycleSwimLaneMode cycles to the next swimlane mode and regroups issues (bv-wjs0)
+func (b *BoardModel) CycleSwimLaneMode() {
+	b.swimLaneMode = SwimLaneMode((int(b.swimLaneMode) + 1) % SwimLaneModeCount)
+	b.regroupIssues()
+}
+
+// regroupIssues rebuilds columns based on current swimlane mode (bv-wjs0)
+func (b *BoardModel) regroupIssues() {
+	b.columns = groupIssuesByMode(b.allIssues, b.swimLaneMode)
+
+	// Reset selection to avoid out-of-bounds
+	for i := 0; i < 4; i++ {
+		if b.selectedRow[i] >= len(b.columns[i]) {
+			if len(b.columns[i]) > 0 {
+				b.selectedRow[i] = len(b.columns[i]) - 1
+			} else {
+				b.selectedRow[i] = 0
+			}
+		}
+	}
+
+	b.updateActiveColumns()
+	b.CancelSearch() // Clear stale search matches
+	b.lastDetailID = "" // Force detail panel refresh
+}
+
+// getColumnHeaders returns the column header titles based on swimlane mode (bv-wjs0)
+func (b *BoardModel) getColumnHeaders() ([]string, []string) {
+	switch b.swimLaneMode {
+	case SwimByPriority:
+		return []string{"P0 CRITICAL", "P1 HIGH", "P2 MEDIUM", "P3+ OTHER"},
+			[]string{"🔥", "⚡", "🔹", "💤"}
+	case SwimByType:
+		return []string{"BUG", "FEATURE", "TASK", "EPIC"},
+			[]string{"🐛", "✨", "📋", "🎯"}
+	default: // SwimByStatus
+		return []string{"OPEN", "IN PROGRESS", "BLOCKED", "CLOSED"},
+			[]string{"📋", "🔄", "🚫", "✅"}
+	}
+}
+
+// NewBoardModel creates a new Kanban board from the given issues
+func NewBoardModel(issues []model.Issue, theme Theme) BoardModel {
+	// Group issues by default mode (status) - bv-wjs0
+	cols := groupIssuesByMode(issues, SwimByStatus)
 
 	// Initialize markdown renderer for detail panel (bv-r6kh)
 	var mdRenderer *glamour.TermRenderer
@@ -140,13 +257,15 @@ func NewBoardModel(issues []model.Issue, theme Theme) BoardModel {
 	}
 
 	b := BoardModel{
-		columns:     cols,
-		focusedCol:  0,
-		theme:       theme,
-		blocksIndex: buildBlocksIndex(issues),
-		issueMap:    issueMap,
-		detailVP:    viewport.New(40, 20),
-		mdRenderer:  mdRenderer,
+		columns:      cols,
+		focusedCol:   0,
+		theme:        theme,
+		swimLaneMode: SwimByStatus, // Default mode (bv-wjs0)
+		allIssues:    issues,       // Store for regrouping (bv-wjs0)
+		blocksIndex:  buildBlocksIndex(issues),
+		issueMap:     issueMap,
+		detailVP:     viewport.New(40, 20),
+		mdRenderer:   mdRenderer,
 	}
 	b.updateActiveColumns()
 	return b
@@ -154,27 +273,12 @@ func NewBoardModel(issues []model.Issue, theme Theme) BoardModel {
 
 // SetIssues updates the board data, typically after filtering
 func (b *BoardModel) SetIssues(issues []model.Issue) {
-	var cols [4][]model.Issue
+	// Store all issues for regrouping on mode change (bv-wjs0)
+	b.allIssues = issues
 
-	for _, issue := range issues {
-		switch issue.Status {
-		case model.StatusOpen:
-			cols[ColOpen] = append(cols[ColOpen], issue)
-		case model.StatusInProgress:
-			cols[ColInProgress] = append(cols[ColInProgress], issue)
-		case model.StatusBlocked:
-			cols[ColBlocked] = append(cols[ColBlocked], issue)
-		case model.StatusClosed:
-			cols[ColClosed] = append(cols[ColClosed], issue)
-		}
-	}
+	// Group by current swimlane mode (bv-wjs0)
+	b.columns = groupIssuesByMode(issues, b.swimLaneMode)
 
-	// Sort each column
-	for i := 0; i < 4; i++ {
-		sortIssuesByPriorityAndDate(cols[i])
-	}
-
-	b.columns = cols
 	b.blocksIndex = buildBlocksIndex(issues) // Rebuild reverse dependency index (bv-1daf)
 
 	// Rebuild issue lookup map for blocker titles (bv-kklp)
@@ -578,9 +682,31 @@ func (b BoardModel) View(width, height int) string {
 		colHeight = 8
 	}
 
-	columnTitles := []string{"OPEN", "IN PROGRESS", "BLOCKED", "CLOSED"}
-	columnColors := []lipgloss.AdaptiveColor{t.Open, t.InProgress, t.Blocked, t.Closed}
-	columnEmoji := []string{"📋", "🔄", "🚫", "✅"}
+	// Get dynamic column headers based on swimlane mode (bv-wjs0)
+	columnTitles, columnEmoji := b.getColumnHeaders()
+
+	// Column colors - use appropriate colors based on mode
+	var columnColors []lipgloss.AdaptiveColor
+	switch b.swimLaneMode {
+	case SwimByPriority:
+		// P0 red, P1 orange, P2 blue, P3+ gray
+		columnColors = []lipgloss.AdaptiveColor{
+			{Light: "#c62828", Dark: "#ef5350"}, // Critical - red
+			{Light: "#f57c00", Dark: "#ffb74d"}, // High - orange
+			{Light: "#1565c0", Dark: "#64b5f6"}, // Medium - blue
+			{Light: "#616161", Dark: "#9e9e9e"}, // Other - gray
+		}
+	case SwimByType:
+		// Bug red, Feature green, Task blue, Epic purple
+		columnColors = []lipgloss.AdaptiveColor{
+			{Light: "#c62828", Dark: "#ef5350"}, // Bug - red
+			{Light: "#2e7d32", Dark: "#81c784"}, // Feature - green
+			{Light: "#1565c0", Dark: "#64b5f6"}, // Task - blue
+			{Light: "#7b1fa2", Dark: "#ce93d8"}, // Epic - purple
+		}
+	default: // SwimByStatus
+		columnColors = []lipgloss.AdaptiveColor{t.Open, t.InProgress, t.Blocked, t.Closed}
+	}
 
 	var renderedCols []string
 

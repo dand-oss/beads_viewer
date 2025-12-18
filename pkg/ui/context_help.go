@@ -130,16 +130,26 @@ const contextHelpBoard = `## Board View
   h/l       Move between columns
   j/k       Move within column
   1-4       Jump to column 1/2/3/4
-  H/L       Jump to first/last column
+  H         Jump to first column
   gg        Go to top of column
   G         Go to bottom of column
   0/$       First/last item in column
+
+**Filtering**
+  o         Open issues only
+  c         Closed issues only
+  r         Ready (no blockers)
+  a         All issues (clear)
+  L         Open label picker
 
 **Search**
   /         Start search
   n/N       Next/prev match
   Enter     Confirm search
-  Esc       Cancel search
+
+**Grouping**
+  s         Cycle swimlane mode
+            (Status/Priority/Type)
 
 **Actions**
   Tab       Toggle detail panel
