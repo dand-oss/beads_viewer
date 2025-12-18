@@ -45,13 +45,16 @@ const THEME = {
         green: '#50FA7B',
         orange: '#FFB86C',
         red: '#FF5555',
-        yellow: '#F1FA8C'
+        yellow: '#F1FA8C',
+        gold: '#fbbf24'
     },
 
     // Link colors
     link: {
         default: '#44475a',
         highlighted: '#BD93F9',
+        gold: '#fbbf24',
+        goldGlow: 'rgba(251, 191, 36, 0.6)',
         critical: '#FF5555',
         cycle: '#FF79C6'
     }
@@ -235,7 +238,13 @@ class GraphStore {
         this.hoveredNode = null;
         this.highlightedNodes = new Set();
         this.highlightedLinks = new Set();
+        this.connectedNodes = new Set(); // Gold glow connected subgraph
         this.focusedPath = null;
+
+        // Heatmap & metrics mode
+        this.heatmapMode = false;
+        this.sizeMetric = 'pagerank'; // pagerank | betweenness | critical | indegree
+        this.maxMetrics = { pagerank: 1, betweenness: 1, critical: 1, indegree: 1 };
 
         // Filters
         this.filters = {
@@ -275,7 +284,9 @@ class GraphStore {
         this.hoveredNode = null;
         this.highlightedNodes.clear();
         this.highlightedLinks.clear();
+        this.connectedNodes.clear();
         this.focusedPath = null;
+        this.heatmapMode = false;
     }
 }
 
@@ -292,6 +303,129 @@ function refreshGraph() {
     if (currentData) {
         store.graph.graphData(currentData);
     }
+}
+
+// ============================================================================
+// HEATMAP & GOLD GLOW HELPERS
+// ============================================================================
+
+/**
+ * Compute max metric values for normalization
+ * Note: Must be called AFTER prepareGraphData since metrics are on prepared nodes
+ */
+function computeMaxMetrics() {
+    // Get prepared nodes from graph data if available, otherwise use raw issues
+    const graphData = store.graph?.graphData();
+    const nodes = graphData?.nodes || store.issues;
+    if (!nodes.length) return;
+
+    store.maxMetrics.pagerank = Math.max(...nodes.map(n => n.pagerank || 0), 0.001);
+    store.maxMetrics.betweenness = Math.max(...nodes.map(n => n.betweenness || 0), 0.001);
+    store.maxMetrics.critical = Math.max(...nodes.map(n => n.criticalDepth || 0), 1);
+    store.maxMetrics.indegree = Math.max(...nodes.map(n => n.blockerCount || 0), 1);
+}
+
+/**
+ * Get heatmap color for a node based on current sizeMetric
+ * Uses HSL: 120 (green) to 0 (red) based on metric intensity
+ */
+function getHeatmapColor(node) {
+    let val = 0, max = 1;
+    switch (store.sizeMetric) {
+        case 'pagerank':
+            val = node.pagerank || 0;
+            max = store.maxMetrics.pagerank;
+            break;
+        case 'betweenness':
+            val = node.betweenness || 0;
+            max = store.maxMetrics.betweenness;
+            break;
+        case 'critical':
+            val = node.criticalDepth || 0;
+            max = store.maxMetrics.critical;
+            break;
+        case 'indegree':
+            val = node.blockerCount || 0;
+            max = store.maxMetrics.indegree;
+            break;
+    }
+    const ratio = Math.min(val / max, 1);
+    const hue = 120 - ratio * 120; // Green (120) to Red (0)
+    return `hsl(${hue}, 80%, 50%)`;
+}
+
+/**
+ * Get connected subgraph nodes via BFS (for gold glow highlight)
+ * @param {string} nodeId - Starting node ID
+ * @param {number} depth - Max depth to traverse (default 2)
+ * @returns {Set<string>} Set of connected node IDs
+ */
+function getConnectedNodes(nodeId, depth = 2) {
+    const connected = new Set([nodeId]);
+    const queue = [{ id: nodeId, d: 0 }];
+    const graphData = store.graph?.graphData();
+    if (!graphData) return connected;
+
+    while (queue.length > 0) {
+        const { id, d } = queue.shift();
+        if (d >= depth) continue;
+
+        graphData.links.forEach(l => {
+            const src = typeof l.source === 'object' ? l.source.id : l.source;
+            const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+            if (src === id && !connected.has(tgt)) {
+                connected.add(tgt);
+                queue.push({ id: tgt, d: d + 1 });
+            }
+            if (tgt === id && !connected.has(src)) {
+                connected.add(src);
+                queue.push({ id: src, d: d + 1 });
+            }
+        });
+    }
+    return connected;
+}
+
+/**
+ * Update connected nodes for gold glow effect
+ */
+function updateConnectedNodes(node) {
+    if (node?.id) {
+        store.connectedNodes = getConnectedNodes(node.id, 2);
+    } else {
+        store.connectedNodes.clear();
+    }
+}
+
+/**
+ * Toggle heatmap mode
+ */
+export function toggleHeatmap() {
+    store.heatmapMode = !store.heatmapMode;
+    refreshGraph();
+    dispatchEvent('heatmapToggle', { active: store.heatmapMode, metric: store.sizeMetric });
+    return store.heatmapMode;
+}
+
+/**
+ * Set the size/heatmap metric
+ */
+export function setSizeMetric(metric) {
+    if (['pagerank', 'betweenness', 'critical', 'indegree'].includes(metric)) {
+        store.sizeMetric = metric;
+        refreshGraph();
+        dispatchEvent('metricChange', { metric: store.sizeMetric });
+    }
+}
+
+/**
+ * Get current heatmap state
+ */
+export function getHeatmapState() {
+    return {
+        active: store.heatmapMode,
+        metric: store.sizeMetric
+    };
 }
 
 // ============================================================================
@@ -457,12 +591,12 @@ function drawClusterHulls(ctx, globalScale) {
             cx /= hull.length;
             cy /= hull.length;
 
-            // Draw label text (capped to prevent oversized fonts when zoomed out)
-            const fontSize = Math.min(24, Math.max(12, 16 / globalScale));
-            ctx.font = `bold ${fontSize}px 'JetBrains Mono', monospace`;
+            // Draw label text - keep ~14px on screen regardless of zoom
+            const fontSize = Math.min(14, Math.max(5, 14 / globalScale));
+            ctx.font = `600 ${fontSize}px 'Inter', sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillStyle = color + 'aa'; // ~67% opacity
+            ctx.fillStyle = color + '99'; // ~60% opacity
             ctx.fillText(label, cx, cy);
         }
 
@@ -734,6 +868,9 @@ export function loadData(issues, dependencies, layout = precomputedLayout) {
     // Update graph
     store.graph.graphData(graphData);
 
+    // Compute max metric values for heatmap normalization (after graph data is set)
+    computeMaxMetrics();
+
     // Fit immediately if pre-computed, otherwise wait for simulation
     if (layout?.positions) {
         store.graph.zoomToFit(200, 50);
@@ -881,6 +1018,11 @@ function getNodeColor(node) {
     // Selected node
     if (store.selectedNode?.id === node.id) return THEME.accent.purple;
 
+    // Heatmap mode: color by metric intensity
+    if (store.heatmapMode) {
+        return getHeatmapColor(node);
+    }
+
     // Label galaxy mode: color by label
     if (labelClusterState.active) {
         return getLabelColor(node);
@@ -896,6 +1038,11 @@ function getNodeOpacity(node) {
         return 0.3;
     }
 
+    // Dim non-connected nodes when showing gold glow connected subgraph
+    if (store.connectedNodes.size > 0 && !store.connectedNodes.has(node.id)) {
+        return 0.2;
+    }
+
     // Dim closed nodes
     if (node.status === 'closed') return 0.6;
 
@@ -908,9 +1055,21 @@ function drawNode(node, ctx, globalScale) {
     const opacity = getNodeOpacity(node);
     const isHovered = store.hoveredNode?.id === node.id;
     const isSelected = store.selectedNode?.id === node.id;
+    const isInConnectedSubgraph = store.connectedNodes.has(node.id);
 
     ctx.save();
     ctx.globalAlpha = opacity;
+
+    // Golden glow for connected subgraph (when hovering/selecting a node)
+    if (store.connectedNodes.size > 0 && isInConnectedSubgraph) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, size + 8, 0, Math.PI * 2);
+        const goldGradient = ctx.createRadialGradient(node.x, node.y, size, node.x, node.y, size + 12);
+        goldGradient.addColorStop(0, THEME.link.goldGlow);
+        goldGradient.addColorStop(1, 'transparent');
+        ctx.fillStyle = goldGradient;
+        ctx.fill();
+    }
 
     // Enhanced glow for what-if states
     if (node._whatIfState === 'closing') {
@@ -935,6 +1094,11 @@ function drawNode(node, ctx, globalScale) {
         ctx.shadowColor = THEME.accent.pink;
         ctx.shadowBlur = 15;
     }
+    // Gold glow for connected subgraph nodes
+    else if (isInConnectedSubgraph && store.connectedNodes.size > 0) {
+        ctx.shadowColor = THEME.accent.gold;
+        ctx.shadowBlur = 15;
+    }
     // Glow effect for important nodes (PageRank sums to 1.0, so threshold ~2x average)
     else if (node.pagerank > 0.03 || isHovered || isSelected) {
         ctx.shadowColor = color;
@@ -956,7 +1120,9 @@ function drawNode(node, ctx, globalScale) {
 
     // Priority indicator (flame for P0/P1)
     if (node.priority <= 1 && globalScale > 0.4) {
-        ctx.font = `${Math.min(16, Math.max(8, 12 / globalScale))}px sans-serif`;
+        // Keep emoji ~12px on screen
+        const emojiSize = Math.min(10, Math.max(4, 12 / globalScale));
+        ctx.font = `${emojiSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         ctx.shadowBlur = 0;
@@ -965,7 +1131,9 @@ function drawNode(node, ctx, globalScale) {
 
     // Cycle warning
     if (node.inCycle && globalScale > 0.4) {
-        ctx.font = `${Math.min(14, Math.max(8, 10 / globalScale))}px sans-serif`;
+        // Keep emoji ~10px on screen
+        const emojiSize = Math.min(8, Math.max(3, 10 / globalScale));
+        ctx.font = `${emojiSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         ctx.fillText('\u26A0\uFE0F', node.x, node.y + size + 2);
@@ -973,20 +1141,25 @@ function drawNode(node, ctx, globalScale) {
 
     // Label (when zoomed in)
     if (store.config.showLabels && globalScale > store.config.labelZoomThreshold) {
-        const fontSize = Math.min(16, Math.max(10, 12 / globalScale));
-        ctx.font = `${fontSize}px 'JetBrains Mono', monospace`;
+        // Font should be ~10px on SCREEN regardless of zoom
+        // worldFontSize * globalScale ≈ 10-12px
+        // Clamp world coords: min 3px (readable at high zoom), max 8px (not huge when zoomed out)
+        const fontSize = Math.min(8, Math.max(3, 10 / globalScale));
+        ctx.font = `500 ${fontSize}px 'Inter', 'JetBrains Mono', sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         ctx.shadowBlur = 0;
         ctx.fillStyle = THEME.fg;
-        ctx.globalAlpha = opacity * 0.9;
+        ctx.globalAlpha = opacity * 0.85;
 
-        // Truncate long titles
+        // Show title when zoomed in enough for it to be readable
         let label = node.id;
-        if (globalScale > 1.2) {
-            label = truncate(node.title || node.id, 25);
+        if (globalScale > 1.5) {
+            label = truncate(node.title || node.id, 30);
+        } else if (globalScale > 1.0) {
+            label = truncate(node.title || node.id, 20);
         }
-        ctx.fillText(label, node.x, node.y + size + 4);
+        ctx.fillText(label, node.x, node.y + size + 3);
     }
 
     ctx.restore();
@@ -1019,6 +1192,8 @@ function getLinkColor(link) {
     const linkId = `${link.source?.id || link.source}-${link.target?.id || link.target}`;
     const sourceNode = typeof link.source === 'object' ? link.source : store.nodeMap.get(link.source);
     const targetNode = typeof link.target === 'object' ? link.target : store.nodeMap.get(link.target);
+    const srcId = sourceNode?.id || link.source;
+    const tgtId = targetNode?.id || link.target;
 
     // What-if cascade links (bright green for unblocking edges)
     if (whatIfState.active && store.highlightedLinks.has(linkId)) {
@@ -1036,6 +1211,11 @@ function getLinkColor(link) {
 
     // Highlighted links
     if (store.highlightedLinks.has(linkId)) return THEME.link.highlighted;
+
+    // Gold glow for connected subgraph links
+    if (store.connectedNodes.size > 0 && store.connectedNodes.has(srcId) && store.connectedNodes.has(tgtId)) {
+        return THEME.link.gold + 'cc'; // Gold with alpha
+    }
 
     // Cycle links
     if (sourceNode?.inCycle && targetNode?.inCycle) return THEME.link.cycle;
@@ -1060,7 +1240,45 @@ function getLinkOpacity(link) {
             return 0.15;
         }
     }
+    // Dim non-connected links when showing connected subgraph
+    if (store.connectedNodes.size > 0) {
+        const sourceId = link.source?.id || link.source;
+        const targetId = link.target?.id || link.target;
+        if (store.connectedNodes.has(sourceId) && store.connectedNodes.has(targetId)) {
+            return 1; // Full opacity for connected links
+        }
+        return 0.1; // Very dim for non-connected
+    }
     return 0.6;
+}
+
+/**
+ * Get link width based on metric or highlight state
+ */
+function getLinkWidth(link, globalScale) {
+    const sourceNode = typeof link.source === 'object' ? link.source : store.nodeMap.get(link.source);
+    const targetNode = typeof link.target === 'object' ? link.target : store.nodeMap.get(link.target);
+    const srcId = sourceNode?.id || link.source;
+    const tgtId = targetNode?.id || link.target;
+    const linkId = `${srcId}-${tgtId}`;
+
+    // Highlighted links (what-if, critical path, etc.) get thick width
+    if (store.highlightedLinks.has(linkId)) {
+        return Math.max(3, 3 / globalScale);
+    }
+
+    // Gold connected subgraph links get medium-thick width
+    if (store.connectedNodes.size > 0 && store.connectedNodes.has(srcId) && store.connectedNodes.has(tgtId)) {
+        return Math.max(2.5, 3 / globalScale);
+    }
+
+    // Critical path edges
+    if (sourceNode?.criticalDepth > 0 && targetNode?.criticalDepth > 0) {
+        return Math.max(2, 2 / globalScale);
+    }
+
+    // Default width
+    return Math.max(1, 1.5 / globalScale);
 }
 
 function drawLink(link, ctx, globalScale) {
@@ -1072,11 +1290,12 @@ function drawLink(link, ctx, globalScale) {
 
     const color = getLinkColor(link);
     const opacity = getLinkOpacity(link);
+    const width = getLinkWidth(link, globalScale);
 
     ctx.save();
     ctx.globalAlpha = opacity;
     ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(1, 1.5 / globalScale);
+    ctx.lineWidth = width;
 
     // Curved link
     const dx = end.x - start.x;
@@ -1158,6 +1377,9 @@ function handleNodeRightClick(node, event) {
 function handleNodeHover(node, prevNode) {
     store.hoveredNode = node;
 
+    // Update connected nodes for gold glow effect
+    updateConnectedNodes(node);
+
     // Update cursor
     if (store.container) {
         store.container.style.cursor = node ? 'pointer' : 'default';
@@ -1169,6 +1391,9 @@ function handleNodeHover(node, prevNode) {
     } else {
         hideTooltip();
     }
+
+    // Refresh graph to show gold glow
+    refreshGraph();
 
     dispatchEvent('nodeHover', { node, prevNode });
 }
@@ -2317,6 +2542,10 @@ function setupKeyboardShortcuts() {
                 break;
             case 'y':
                 toggleCycleNavigator();
+                break;
+            case 'h':
+                // Toggle heatmap mode
+                toggleHeatmap();
                 break;
             case '[':
                 // Previous cycle
