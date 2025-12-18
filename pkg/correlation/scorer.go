@@ -384,7 +384,7 @@ func (s *Scorer) ExtractSignals(commit CorrelatedCommit) []CorrelationSignal {
 		signals = append(signals, CorrelationSignal{
 			Type:   SignalMessageMatch,
 			Weight: 40,
-			Detail: fmt.Sprintf("Commit message contains bead ID reference"),
+			Detail: "Commit message contains bead ID reference",
 		})
 	case MethodTemporalAuthor:
 		signals = append(signals, CorrelationSignal{
@@ -401,7 +401,7 @@ func (s *Scorer) ExtractSignals(commit CorrelatedCommit) []CorrelationSignal {
 
 	// File-based signals
 	if len(commit.Files) > 0 {
-		fileWeight := min(len(commit.Files)*5, 15)
+		fileWeight := minInt(len(commit.Files)*5, 15)
 		signals = append(signals, CorrelationSignal{
 			Type:   SignalFileOverlap,
 			Weight: fileWeight,
@@ -440,7 +440,7 @@ func (s *Scorer) buildSummary(commit CorrelatedCommit, signals []CorrelationSign
 }
 
 // buildRecommendation suggests what to do about this correlation
-func (s *Scorer) buildRecommendation(confidence float64, signalCount int) string {
+func (s *Scorer) buildRecommendation(confidence float64, _ int) string {
 	switch {
 	case confidence >= 0.85:
 		return "High confidence - likely correct, no action needed"
@@ -462,8 +462,8 @@ func (s *Scorer) ExplainMultiple(commits []CorrelatedCommit, beadID string) []Co
 	return explanations
 }
 
-// min returns the minimum of two ints
-func min(a, b int) int {
+// minInt returns the minimum of two ints
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

@@ -58,9 +58,7 @@ func (fs *FeedbackStore) Load() error {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	lineNum := 0
 	for scanner.Scan() {
-		lineNum++
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue

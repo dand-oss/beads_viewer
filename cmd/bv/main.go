@@ -2692,8 +2692,16 @@ func main() {
 			}
 
 			// Generate history report to find the correlation
-			cwd, _ := os.Getwd()
-			beadsPath, _ := loader.FindJSONLPath(beadsDir)
+			cwd, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+				os.Exit(1)
+			}
+			beadsPath, err := loader.FindJSONLPath(beadsDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error finding beads file: %v\n", err)
+				os.Exit(1)
+			}
 			correlator := correlation.NewCorrelator(cwd, beadsPath)
 
 			beadInfos := make([]correlation.BeadInfo, len(issues))
@@ -2764,8 +2772,16 @@ func main() {
 			}
 
 			// Get original confidence from history
-			cwd, _ := os.Getwd()
-			beadsPath, _ := loader.FindJSONLPath(beadsDir)
+			cwd, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+				os.Exit(1)
+			}
+			beadsPath, err := loader.FindJSONLPath(beadsDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error finding beads file: %v\n", err)
+				os.Exit(1)
+			}
 			correlator := correlation.NewCorrelator(cwd, beadsPath)
 
 			beadInfos := make([]correlation.BeadInfo, len(issues))
@@ -2774,7 +2790,11 @@ func main() {
 			}
 
 			opts := correlation.CorrelatorOptions{BeadID: beadID}
-			report, _ := correlator.GenerateReport(beadInfos, opts)
+			report, err := correlator.GenerateReport(beadInfos, opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error generating report: %v\n", err)
+				os.Exit(1)
+			}
 
 			var originalConf float64
 			if history, ok := report.Histories[beadID]; ok {
@@ -2802,7 +2822,10 @@ func main() {
 			}
 			encoder := json.NewEncoder(os.Stdout)
 			encoder.SetIndent("", "  ")
-			encoder.Encode(result)
+			if err := encoder.Encode(result); err != nil {
+				fmt.Fprintf(os.Stderr, "Error encoding result: %v\n", err)
+				os.Exit(1)
+			}
 			os.Exit(0)
 		}
 
@@ -2820,8 +2843,16 @@ func main() {
 			}
 
 			// Get original confidence from history
-			cwd, _ := os.Getwd()
-			beadsPath, _ := loader.FindJSONLPath(beadsDir)
+			cwd, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+				os.Exit(1)
+			}
+			beadsPath, err := loader.FindJSONLPath(beadsDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error finding beads file: %v\n", err)
+				os.Exit(1)
+			}
 			correlator := correlation.NewCorrelator(cwd, beadsPath)
 
 			beadInfos := make([]correlation.BeadInfo, len(issues))
@@ -2830,7 +2861,11 @@ func main() {
 			}
 
 			opts := correlation.CorrelatorOptions{BeadID: beadID}
-			report, _ := correlator.GenerateReport(beadInfos, opts)
+			report, err := correlator.GenerateReport(beadInfos, opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error generating report: %v\n", err)
+				os.Exit(1)
+			}
 
 			var originalConf float64
 			if history, ok := report.Histories[beadID]; ok {
@@ -2858,7 +2893,10 @@ func main() {
 			}
 			encoder := json.NewEncoder(os.Stdout)
 			encoder.SetIndent("", "  ")
-			encoder.Encode(result)
+			if err := encoder.Encode(result); err != nil {
+				fmt.Fprintf(os.Stderr, "Error encoding result: %v\n", err)
+				os.Exit(1)
+			}
 			os.Exit(0)
 		}
 	}
