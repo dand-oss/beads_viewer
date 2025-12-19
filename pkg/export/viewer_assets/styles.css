@@ -1099,6 +1099,26 @@ body,
 }
 
 /* ============================================================================
+   BODY SCROLL LOCK FOR MODALS
+   ============================================================================ */
+
+/* Prevent body scroll when modal is open (iOS scroll bleed fix) */
+body.modal-open {
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    /* Preserve scroll position */
+    top: calc(var(--scroll-y, 0) * -1);
+}
+
+/* Ensure modal content can still scroll */
+body.modal-open .overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+/* ============================================================================
    MOBILE BOTTOM SHEET
    ============================================================================ */
 
@@ -2316,5 +2336,39 @@ body,
 
     .insights-grid .metric-panel-expanded {
         grid-column: span 2;
+    }
+}
+
+/* =============================================================================
+   Reduced Motion Support - Accessibility
+   ============================================================================= */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    /* Disable specific animations */
+    .animate-spin,
+    .animate-pulse,
+    .animate-bounce {
+        animation: none !important;
+    }
+
+    /* Disable transform transitions (scale, translate, etc.) */
+    .hover\:scale-\[1\.02\]:hover,
+    .active\:scale-95:active,
+    .group-hover\:scale-110:hover {
+        transform: none !important;
+    }
+
+    /* Keep opacity transitions very brief for visual feedback */
+    [x-transition\:enter],
+    [x-transition\:leave] {
+        transition-duration: 0.01ms !important;
     }
 }

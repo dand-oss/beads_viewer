@@ -807,13 +807,24 @@ export async function initGraph(containerId, options = {}) {
         .onBackgroundClick(handleBackgroundClick)
         .onZoom(handleZoom)
 
-        // Simulation progress tracking
+        // Simulation progress tracking with early "done" detection
+        // The simulation can run for a long time at very low alpha values,
+        // but the layout is visually stable much earlier. We consider it "done"
+        // when alpha drops below 0.05 (95% progress) for smoother UX.
         .onEngineTick(() => {
             // Get current simulation alpha (1 = start, 0 = done)
             // Alpha decays from 1 towards alphaMin (0.001)
             const alpha = store.graph.d3Alpha?.() ?? 0;
             const progress = Math.round((1 - alpha) * 100);
-            dispatchEvent('simulationProgress', { alpha, progress, done: false });
+
+            // Consider layout stable when alpha < 0.05 (95% progress)
+            // This provides a much snappier feel without waiting for full convergence
+            const effectivelyDone = alpha < 0.05;
+            dispatchEvent('simulationProgress', {
+                alpha,
+                progress: effectivelyDone ? 100 : progress,
+                done: effectivelyDone
+            });
         })
         .onEngineStop(() => {
             dispatchEvent('simulationProgress', { alpha: 0, progress: 100, done: true });

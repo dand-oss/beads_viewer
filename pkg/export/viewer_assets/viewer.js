@@ -27,6 +27,8 @@ const DIAGNOSTICS = {
   wasm: false,           // sql.js WASM loaded
   opfs: null,            // OPFS available (null = not checked, true/false)
   graphWasm: false,      // bv_graph WASM loaded
+  hybridWasm: false,     // hybrid scorer WASM loaded
+  hybridWasmReason: null, // Reason when hybrid WASM disabled
   dbSource: 'unknown',   // 'network' | 'cache' | 'chunks'
   dbSizeBytes: 0,        // Database size in bytes
   issueCount: 0,         // Number of issues
@@ -855,18 +857,19 @@ function getTopKSet(k = 5) {
 /**
  * Build WHERE clauses from filters (shared between query and count)
  */
-function buildFilterClauses(filters = {}) {
+function buildFilterClauses(filters = {}, tableAlias = '') {
   const clauses = [];
   const params = [];
+  const col = (name) => (tableAlias ? `${tableAlias}.${name}` : name);
 
   // Status filter (supports array for multi-select)
   if (filters.status?.length) {
     const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
     if (statuses.length === 1) {
-      clauses.push(`status = ?`);
+      clauses.push(`${col('status')} = ?`);
       params.push(statuses[0]);
     } else {
-      clauses.push(`status IN (${statuses.map(() => '?').join(',')})`);
+      clauses.push(`${col('status')} IN (${statuses.map(() => '?').join(',')})`);
       params.push(...statuses);
     }
   }
@@ -875,10 +878,10 @@ function buildFilterClauses(filters = {}) {
   if (filters.type?.length) {
     const types = Array.isArray(filters.type) ? filters.type : [filters.type];
     if (types.length === 1) {
-      clauses.push(`issue_type = ?`);
+      clauses.push(`${col('issue_type')} = ?`);
       params.push(types[0]);
     } else {
-      clauses.push(`issue_type IN (${types.map(() => '?').join(',')})`);
+      clauses.push(`${col('issue_type')} IN (${types.map(() => '?').join(',')})`);
       params.push(...types);
     }
   }
@@ -889,43 +892,43 @@ function buildFilterClauses(filters = {}) {
 	      .map(p => parseInt(p, 10))
 	      .filter(p => !isNaN(p));
 	    if (priorities.length === 1) {
-	      clauses.push(`priority = ?`);
-	      params.push(priorities[0]);
-	    } else if (priorities.length > 1) {
-      clauses.push(`priority IN (${priorities.map(() => '?').join(',')})`);
+      clauses.push(`${col('priority')} = ?`);
+      params.push(priorities[0]);
+    } else if (priorities.length > 1) {
+      clauses.push(`${col('priority')} IN (${priorities.map(() => '?').join(',')})`);
       params.push(...priorities);
     }
   }
 
   // Assignee filter
   if (filters.assignee) {
-    clauses.push(`assignee = ?`);
+    clauses.push(`${col('assignee')} = ?`);
     params.push(filters.assignee);
   }
 
 	  // Blocked filter
 	  if (filters.hasBlockers === true || filters.hasBlockers === 'true') {
-	    clauses.push(`(blocked_by_ids IS NOT NULL AND blocked_by_ids <> '')`);
-	  } else if (filters.hasBlockers === false || filters.hasBlockers === 'false') {
-	    clauses.push(`(blocked_by_ids IS NULL OR blocked_by_ids = '')`);
-	  }
+    clauses.push(`(${col('blocked_by_ids')} IS NOT NULL AND ${col('blocked_by_ids')} <> '')`);
+  } else if (filters.hasBlockers === false || filters.hasBlockers === 'false') {
+    clauses.push(`(${col('blocked_by_ids')} IS NULL OR ${col('blocked_by_ids')} = '')`);
+  }
 
   // Blocking filter (has items depending on it)
   if (filters.isBlocking === true || filters.isBlocking === 'true') {
-    clauses.push(`blocks_count > 0`);
+    clauses.push(`${col('blocks_count')} > 0`);
   }
 
   // Label filter (JSON array contains)
   if (filters.labels?.length) {
     const labels = Array.isArray(filters.labels) ? filters.labels : [filters.labels];
-    const labelClauses = labels.map(() => `labels LIKE ?`);
+    const labelClauses = labels.map(() => `${col('labels')} LIKE ?`);
     clauses.push(`(${labelClauses.join(' OR ')})`);
     params.push(...labels.map(l => `%"${l}"%`));
   }
 
   // Search filter (LIKE-based, FTS5 handled separately)
   if (filters.search) {
-    clauses.push(`(title LIKE ? OR description LIKE ? OR id LIKE ?)`);
+    clauses.push(`(${col('title')} LIKE ? OR ${col('description')} LIKE ? OR ${col('id')} LIKE ?)`);
     const searchTerm = `%${filters.search}%`;
     params.push(searchTerm, searchTerm, searchTerm);
   }
@@ -1056,22 +1059,179 @@ function getGraphViewData() {
 /**
  * Full-text search using FTS5 (if available)
  */
-function searchIssues(term, limit = 50) {
-  // Try FTS5 first
-  try {
-    const sql = `
-      SELECT id, title,
+const BM25_WEIGHTS = '3.0, 2.0, 1.0, 1.5, 0.5'; // id, title, description, labels, assignee
+const BM25_EXPR = `bm25(issues_fts, ${BM25_WEIGHTS})`;
+
+function isLikelyIssueID(term) {
+  return /^[A-Za-z]+-[A-Za-z0-9]+$/.test((term || '').trim());
+}
+
+function promoteExactID(term, rows) {
+  const needle = (term || '').trim().toLowerCase();
+  if (!needle || rows.length === 0) return rows;
+  const idx = rows.findIndex(r => String(r.id || r.issue_id || '').toLowerCase() === needle);
+  if (idx > 0) {
+    const match = rows.splice(idx, 1)[0];
+    rows.unshift(match);
+  }
+  return rows;
+}
+
+const SHORT_QUERY_TOKEN_LIMIT = 2;
+const SHORT_QUERY_LENGTH_LIMIT = 12;
+const SHORT_QUERY_MIN_TEXT_WEIGHT = 0.55;
+const HYBRID_CANDIDATE_MIN = 200;
+const HYBRID_CANDIDATE_MIN_SHORT = 300;
+
+function countTokens(term) {
+  if (!term) return 0;
+  const matches = term.match(/[A-Za-z0-9]+/g);
+  return matches ? matches.length : 0;
+}
+
+function isShortQuery(term) {
+  const trimmed = (term || '').trim();
+  if (!trimmed) return true;
+  const tokens = countTokens(trimmed);
+  return tokens <= SHORT_QUERY_TOKEN_LIMIT || trimmed.length <= SHORT_QUERY_LENGTH_LIMIT;
+}
+
+function adjustHybridWeightsForQuery(baseWeights, term) {
+  if (!baseWeights || !isShortQuery(term)) return baseWeights;
+  const currentText = Number(baseWeights.text ?? 0);
+  if (currentText >= SHORT_QUERY_MIN_TEXT_WEIGHT) return baseWeights;
+  const targetText = SHORT_QUERY_MIN_TEXT_WEIGHT;
+  const remainder = (Number(baseWeights.pagerank ?? 0) +
+    Number(baseWeights.status ?? 0) +
+    Number(baseWeights.impact ?? 0) +
+    Number(baseWeights.priority ?? 0) +
+    Number(baseWeights.recency ?? 0));
+  if (remainder <= 0 || targetText >= 1) {
+    return {
+      text: 1,
+      pagerank: 0,
+      status: 0,
+      impact: 0,
+      priority: 0,
+      recency: 0,
+    };
+  }
+  const scale = (1 - targetText) / remainder;
+  return {
+    text: targetText,
+    pagerank: Number(baseWeights.pagerank ?? 0) * scale,
+    status: Number(baseWeights.status ?? 0) * scale,
+    impact: Number(baseWeights.impact ?? 0) * scale,
+    priority: Number(baseWeights.priority ?? 0) * scale,
+    recency: Number(baseWeights.recency ?? 0) * scale,
+  };
+}
+
+function searchIssues(term, options = {}) {
+  const {
+    mode = 'text',
+    preset = 'default',
+    limit = 50,
+    offset = 0,
+    filters = {},
+  } = options;
+
+  const searchFilters = { ...filters };
+  delete searchFilters.search;
+
+  const { clauses, params } = buildFilterClauses(searchFilters, 'i');
+  const baseSQL = `
+      SELECT i.*,
              snippet(issues_fts, 2, '<mark>', '</mark>', '...', 32) as snippet,
-             bm25(issues_fts) as rank
+             ${BM25_EXPR} as bm25_score
       FROM issues_fts
+      JOIN issue_overview_mv i ON issues_fts.id = i.id
       WHERE issues_fts MATCH ?
-      ORDER BY rank
-      LIMIT ?
     `;
-    return execQuery(sql, [term + '*', limit]);
+  let sql = baseSQL;
+  const queryParams = [term + '*'];
+  if (clauses.length > 0) {
+    sql += ` AND ${clauses.join(' AND ')}`;
+    queryParams.push(...params);
+  }
+
+  let fetchLimit = limit;
+  if (mode === 'hybrid') {
+    const minCandidates = isShortQuery(term) ? HYBRID_CANDIDATE_MIN_SHORT : HYBRID_CANDIDATE_MIN;
+    fetchLimit = Math.max(limit * 2, offset + limit, minCandidates);
+  }
+  const fetchOffset = mode === 'hybrid' ? 0 : offset;
+  sql += ` ORDER BY ${BM25_EXPR} LIMIT ? OFFSET ?`;
+  queryParams.push(fetchLimit, fetchOffset);
+
+  let rows = [];
+  try {
+    rows = execQuery(sql, queryParams);
   } catch {
-    // Fallback to LIKE search
-    return queryIssues({ search: term }, 'score', limit, 0);
+    return queryIssues({ ...searchFilters, search: term }, 'score', limit, offset);
+  }
+  if (isLikelyIssueID(term)) {
+    rows = promoteExactID(term, rows);
+  }
+
+  if (mode !== 'hybrid' || typeof HybridScorer === 'undefined' || typeof HYBRID_PRESETS === 'undefined') {
+    return rows.slice(0, limit);
+  }
+
+  const maxBM25 = Math.max(...rows.map(r => Math.abs(r.bm25_score ?? 0)), 0);
+  const normalized = rows.map(r => ({
+    ...r,
+    textScore: maxBM25 > 0 ? (1 - Math.min(Math.abs(r.bm25_score ?? 0) / maxBM25, 1)) : 0.5,
+    blockerCount: r.blocker_count ?? r.blocked_by_count ?? 0,
+    updatedAt: r.updated_at,
+    pagerank: r.pagerank,
+    status: r.status,
+    priority: r.priority,
+  }));
+
+  const baseWeights = HYBRID_PRESETS[preset] || HYBRID_PRESETS.default;
+  const weights = adjustHybridWeightsForQuery(baseWeights, term);
+  let ranked = null;
+  if (typeof window.scoreBatchHybrid === 'function') {
+    ranked = window.scoreBatchHybrid(normalized, weights);
+  }
+  if (!Array.isArray(ranked)) {
+    const scorer = new HybridScorer(weights);
+    ranked = scorer.scoreAndRank(normalized);
+  }
+  if (isLikelyIssueID(term)) {
+    ranked = promoteExactID(term, ranked);
+  }
+
+  return ranked
+    .slice(offset, offset + limit)
+    .map(r => ({
+      ...r,
+      text_score: r.textScore,
+    }));
+}
+
+function countSearchIssues(term, filters = {}) {
+  const searchFilters = { ...filters };
+  delete searchFilters.search;
+  const { clauses, params } = buildFilterClauses(searchFilters, 'i');
+
+  let sql = `
+      SELECT COUNT(*) as count
+      FROM issues_fts
+      JOIN issue_overview_mv i ON issues_fts.id = i.id
+      WHERE issues_fts MATCH ?
+    `;
+  const queryParams = [term + '*'];
+  if (clauses.length > 0) {
+    sql += ` AND ${clauses.join(' AND ')}`;
+    queryParams.push(...params);
+  }
+
+  try {
+    return execScalar(sql, queryParams) || 0;
+  } catch {
+    return countIssues({ ...searchFilters, search: term });
   }
 }
 
@@ -1823,12 +1983,57 @@ function goBack(fallback = '/') {
 // ============================================================================
 
 /**
- * Format ISO date to readable string
+ * Format ISO date to readable string with relative time for recent dates
  */
 function formatDate(isoString) {
   if (!isoString) return '';
   try {
     const date = new Date(isoString);
+    if (isNaN(date.getTime())) return isoString; // Invalid date
+
+    const now = new Date();
+    const diffMs = now - date;
+
+    // Future dates or very recent: show absolute date
+    if (diffMs < 0) {
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      });
+    }
+
+    const diffSecs = Math.floor(diffMs / 1000);
+    const diffMins = Math.floor(diffSecs / 60);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    // Relative time for recent dates (< 7 days)
+    if (diffSecs < 60) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return 'yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+
+    // Absolute date for older items
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  } catch {
+    return isoString;
+  }
+}
+
+/**
+ * Format ISO date to full readable string (always absolute, with time)
+ */
+function formatDateFull(isoString) {
+  if (!isoString) return '';
+  try {
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return isoString; // Invalid date
     return date.toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
@@ -2013,6 +2218,8 @@ function beadsApp() {
     },
     sort: 'priority',
     searchQuery: '',
+    searchMode: 'text',
+    searchPreset: 'default',
 
     // Dashboard data
     topPicks: [],
@@ -2082,6 +2289,36 @@ function beadsApp() {
       if (this.darkMode) {
         document.documentElement.classList.add('dark');
       }
+
+      // Body scroll lock for modals (iOS scroll bleed fix)
+      // Watches both issue modal and graph detail pane
+      const updateBodyScrollLock = () => {
+        const hasModal = !!(this.selectedIssue || this.graphDetailNode);
+        if (hasModal) {
+          // Save scroll position before locking
+          document.body.style.setProperty('--scroll-y', `${window.scrollY}px`);
+          document.body.classList.add('modal-open');
+        } else {
+          // Restore scroll position after unlocking
+          const scrollY = document.body.style.getPropertyValue('--scroll-y');
+          document.body.classList.remove('modal-open');
+          if (scrollY) {
+            window.scrollTo(0, parseInt(scrollY || '0', 10));
+          }
+        }
+      };
+
+      // Watch for modal state changes using Alpine's $watch
+      this.$watch('selectedIssue', updateBodyScrollLock);
+      this.$watch('graphDetailNode', updateBodyScrollLock);
+
+      // Scroll to top on view change (respect reduced motion preference)
+      this.$watch('view', (newView, oldView) => {
+        if (newView !== oldView && !this.selectedIssue && !this.graphDetailNode) {
+          const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          window.scrollTo({ top: 0, behavior: prefersReducedMotion ? 'auto' : 'smooth' });
+        }
+      });
 
       // Listen for system preference changes (only if no stored preference)
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
@@ -2215,6 +2452,19 @@ function beadsApp() {
         this.meta = getMeta();
         this.stats = getStats();
         DIAGNOSTICS.issueCount = this.stats.total || 0;
+        if (typeof window.initHybridWasmScorer === 'function') {
+          window.initHybridWasmScorer(DIAGNOSTICS.issueCount)
+            .then((enabled) => {
+              DIAGNOSTICS.hybridWasm = !!enabled;
+              if (!enabled && typeof window.getHybridWasmStatus === 'function') {
+                DIAGNOSTICS.hybridWasmReason = window.getHybridWasmStatus().reason;
+              }
+            })
+            .catch((err) => {
+              DIAGNOSTICS.hybridWasm = false;
+              DIAGNOSTICS.hybridWasmReason = err?.message || 'Hybrid WASM init failed';
+            });
+        }
 
         this.topPicks = getTopPicks(5);
         this.recentIssues = getRecentIssues(10);
@@ -2534,6 +2784,75 @@ function beadsApp() {
     },
 
     /**
+     * Zoom in on the graph by 50%
+     */
+    graphZoomIn() {
+      if (!this.forceGraphModule || !this.forceGraphReady) return;
+      const graph = this.forceGraphModule.getGraph?.();
+      if (graph && typeof graph.zoom === 'function') {
+        const currentZoom = graph.zoom();
+        graph.zoom(currentZoom * 1.5, 300);
+      }
+    },
+
+    /**
+     * Zoom out on the graph by 50%
+     */
+    graphZoomOut() {
+      if (!this.forceGraphModule || !this.forceGraphReady) return;
+      const graph = this.forceGraphModule.getGraph?.();
+      if (graph && typeof graph.zoom === 'function') {
+        const currentZoom = graph.zoom();
+        graph.zoom(currentZoom / 1.5, 300);
+      }
+    },
+
+    /**
+     * Fit the graph to view all nodes
+     */
+    graphZoomToFit() {
+      if (!this.forceGraphModule || !this.forceGraphReady) return;
+      const graph = this.forceGraphModule.getGraph?.();
+      if (graph && typeof graph.zoomToFit === 'function') {
+        graph.zoomToFit(400, 50);
+      }
+    },
+
+    /**
+     * Search for a node in the graph and center on it
+     */
+    graphSearchNode(query) {
+      if (!this.forceGraphModule || !this.forceGraphReady || !query) return null;
+      const graph = this.forceGraphModule.getGraph?.();
+      if (!graph) return null;
+
+      // Get graph data safely
+      const graphData = graph.graphData?.();
+      if (!graphData || !graphData.nodes) return null;
+
+      // Search by ID or title
+      const q = query.toLowerCase().trim();
+      if (!q) return null;
+
+      const found = graphData.nodes.find(n =>
+        (n.id && n.id.toLowerCase().includes(q)) ||
+        (n.title && n.title.toLowerCase().includes(q))
+      );
+
+      if (found && typeof found.x === 'number' && typeof found.y === 'number') {
+        // Center view on the node
+        graph.centerAt(found.x, found.y, 500);
+        graph.zoom(2, 500);
+        // Select it via the module's selection function if available
+        if (this.forceGraphModule.selectNode) {
+          this.forceGraphModule.selectNode(found.id);
+        }
+        return found;
+      }
+      return null;
+    },
+
+    /**
      * Load issues based on current filters
      */
     loadIssues() {
@@ -2543,8 +2862,19 @@ function beadsApp() {
         search: this.searchQuery,
       };
 
-      this.issues = queryIssues(filters, this.sort, this.pageSize, offset);
-      this.totalIssues = countIssues(filters);
+      if (this.searchQuery) {
+        this.issues = searchIssues(this.searchQuery, {
+          mode: this.searchMode,
+          preset: this.searchPreset,
+          limit: this.pageSize,
+          offset,
+          filters,
+        });
+        this.totalIssues = countSearchIssues(this.searchQuery, filters);
+      } else {
+        this.issues = queryIssues(filters, this.sort, this.pageSize, offset);
+        this.totalIssues = countIssues(filters);
+      }
 
       // Sync URL state (only on issues view)
       if (this.view === 'issues') {
@@ -3009,9 +3339,14 @@ function beadsApp() {
     },
 
     /**
-     * Format date helper
+     * Format date helper (relative for recent, absolute for older)
      */
     formatDate,
+
+    /**
+     * Format date helper (always absolute with time)
+     */
+    formatDateFull,
 
     /**
      * Render markdown helper
