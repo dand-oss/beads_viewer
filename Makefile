@@ -10,8 +10,9 @@ export CGO_CFLAGS := -DSQLITE_ENABLE_FTS5
 build:
 	go build -o bv ./cmd/bv
 
-install:
-	go install ./cmd/bv
+install: build
+	mkdir -p $(HOME)/.local/bin
+	cp bv $(HOME)/.local/bin/
 
 clean:
 	rm -f bv
