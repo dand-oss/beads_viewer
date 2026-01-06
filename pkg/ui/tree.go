@@ -407,7 +407,9 @@ func issueTypeOrder(t model.IssueType) int {
 }
 
 // View renders the tree view.
-// Implementation for bv-1371.
+// Implementation for bv-1371, updated for windowed rendering (bv-db02).
+// Only renders visible nodes based on viewportOffset and height for O(viewport)
+// performance instead of O(n) where n is total nodes.
 func (t *TreeModel) View() string {
 	if !t.built || len(t.flatList) == 0 {
 		return t.renderEmptyState()
@@ -415,15 +417,12 @@ func (t *TreeModel) View() string {
 
 	var sb strings.Builder
 
-	// Calculate available height for tree display
-	availHeight := t.height
-	if availHeight <= 0 {
-		availHeight = 20 // Default
-	}
-	_ = availHeight // Will be used for viewport scrolling in future
+	// Get visible range - O(1) calculation based on viewportOffset and height
+	start, end := t.visibleRange()
 
-	// Render visible nodes
-	for i, node := range t.flatList {
+	// Render only visible nodes (bv-db02: windowed rendering)
+	for i := start; i < end; i++ {
+		node := t.flatList[i]
 		if node == nil || node.Issue == nil {
 			continue
 		}

@@ -1326,3 +1326,158 @@ func TestGetViewportOffset(t *testing.T) {
 		t.Errorf("GetViewportOffset() = %d, want 42", got)
 	}
 }
+
+// =============================================================================
+// Windowed rendering tests (bv-db02)
+// =============================================================================
+
+// TestViewRendersOnlyVisible verifies that View() only renders visible nodes
+func TestViewRendersOnlyVisible(t *testing.T) {
+	// Create many issues for testing
+	var issues []model.Issue
+	for i := 0; i < 100; i++ {
+		issues = append(issues, model.Issue{
+			ID:        fmt.Sprintf("issue-%02d", i),
+			Title:     fmt.Sprintf("Issue %d", i),
+			Priority:  2,
+			IssueType: model.TypeTask,
+		})
+	}
+
+	tree := NewTreeModel(testTheme())
+	tree.Build(issues)
+	tree.SetSize(80, 10) // Viewport of 10 lines
+
+	// Scroll to middle
+	tree.viewportOffset = 50
+
+	output := tree.View()
+	lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
+
+	// Should have exactly 10 lines (viewport height)
+	if len(lines) != 10 {
+		t.Errorf("expected 10 lines, got %d", len(lines))
+	}
+
+	// Should contain node 50's content (issue-50)
+	if !strings.Contains(output, "issue-50") {
+		t.Error("first visible node (issue-50) not rendered")
+	}
+
+	// Should contain node 59's content (last visible)
+	if !strings.Contains(output, "issue-59") {
+		t.Error("last visible node (issue-59) not rendered")
+	}
+
+	// Should NOT contain node 0's content
+	if strings.Contains(output, "issue-00") {
+		t.Error("non-visible node (issue-00) incorrectly rendered")
+	}
+
+	// Should NOT contain node 49's content (just before viewport)
+	if strings.Contains(output, "issue-49") {
+		t.Error("non-visible node (issue-49) incorrectly rendered")
+	}
+
+	// Should NOT contain node 60's content (just after viewport)
+	if strings.Contains(output, "issue-60") {
+		t.Error("non-visible node (issue-60) incorrectly rendered")
+	}
+}
+
+// TestViewRendersSmallTree verifies small trees still work correctly
+func TestViewRendersSmallTree(t *testing.T) {
+	issues := []model.Issue{
+		{ID: "issue-1", Title: "Issue 1", Priority: 1, IssueType: model.TypeTask},
+		{ID: "issue-2", Title: "Issue 2", Priority: 2, IssueType: model.TypeTask},
+		{ID: "issue-3", Title: "Issue 3", Priority: 3, IssueType: model.TypeTask},
+	}
+
+	tree := NewTreeModel(testTheme())
+	tree.Build(issues)
+	tree.SetSize(80, 20) // Viewport larger than tree
+
+	output := tree.View()
+
+	// Should contain all 3 issues
+	if !strings.Contains(output, "issue-1") {
+		t.Error("issue-1 not rendered")
+	}
+	if !strings.Contains(output, "issue-2") {
+		t.Error("issue-2 not rendered")
+	}
+	if !strings.Contains(output, "issue-3") {
+		t.Error("issue-3 not rendered")
+	}
+}
+
+// TestViewSelectionHighlightWithOffset verifies selection works with offset
+func TestViewSelectionHighlightWithOffset(t *testing.T) {
+	// Create issues
+	var issues []model.Issue
+	for i := 0; i < 50; i++ {
+		issues = append(issues, model.Issue{
+			ID:        fmt.Sprintf("issue-%02d", i),
+			Title:     fmt.Sprintf("Issue %d", i),
+			Priority:  2,
+			IssueType: model.TypeTask,
+		})
+	}
+
+	tree := NewTreeModel(testTheme())
+	tree.Build(issues)
+	tree.SetSize(80, 10)
+
+	// Move cursor to position 25 and ensure it's visible
+	tree.cursor = 25
+	tree.ensureCursorVisible()
+
+	output := tree.View()
+
+	// The selected issue should be in the output
+	if !strings.Contains(output, "issue-25") {
+		t.Error("selected issue (issue-25) not in output")
+	}
+
+	// Cursor should be visible
+	if tree.cursor < tree.viewportOffset || tree.cursor >= tree.viewportOffset+10 {
+		t.Errorf("cursor %d not visible with offset %d", tree.cursor, tree.viewportOffset)
+	}
+}
+
+// TestViewAtEndOfList verifies rendering at the end of a long list
+func TestViewAtEndOfList(t *testing.T) {
+	var issues []model.Issue
+	for i := 0; i < 100; i++ {
+		issues = append(issues, model.Issue{
+			ID:        fmt.Sprintf("issue-%02d", i),
+			Title:     fmt.Sprintf("Issue %d", i),
+			Priority:  2,
+			IssueType: model.TypeTask,
+		})
+	}
+
+	tree := NewTreeModel(testTheme())
+	tree.Build(issues)
+	tree.SetSize(80, 10)
+
+	// Jump to bottom
+	tree.JumpToBottom()
+
+	output := tree.View()
+
+	// Should contain the last issue
+	if !strings.Contains(output, "issue-99") {
+		t.Error("last issue (issue-99) not rendered")
+	}
+
+	// Should contain issue-90 (10 items from the end)
+	if !strings.Contains(output, "issue-90") {
+		t.Error("issue-90 not rendered")
+	}
+
+	// Should NOT contain issue-89
+	if strings.Contains(output, "issue-89") {
+		t.Error("issue-89 incorrectly rendered")
+	}
+}
