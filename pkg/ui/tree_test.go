@@ -1481,3 +1481,107 @@ func TestViewAtEndOfList(t *testing.T) {
 		t.Error("issue-89 incorrectly rendered")
 	}
 }
+
+// =============================================================================
+// Position indicator tests (bv-2nax)
+// =============================================================================
+
+// TestPositionIndicatorShown verifies indicator appears for large trees
+func TestPositionIndicatorShown(t *testing.T) {
+	var issues []model.Issue
+	for i := 0; i < 100; i++ {
+		issues = append(issues, model.Issue{
+			ID:        fmt.Sprintf("issue-%02d", i),
+			Title:     fmt.Sprintf("Issue %d", i),
+			Priority:  2,
+			IssueType: model.TypeTask,
+		})
+	}
+
+	tree := NewTreeModel(testTheme())
+	tree.Build(issues)
+	tree.SetSize(80, 10) // Viewport of 10, 100 nodes
+
+	output := tree.View()
+
+	// Should contain position indicator "[1-10 of 100]"
+	if !strings.Contains(output, "[1-10 of 100]") {
+		t.Errorf("position indicator not found in output, got:\n%s", output)
+	}
+}
+
+// TestPositionIndicatorMiddle verifies indicator at middle of list
+func TestPositionIndicatorMiddle(t *testing.T) {
+	var issues []model.Issue
+	for i := 0; i < 100; i++ {
+		issues = append(issues, model.Issue{
+			ID:        fmt.Sprintf("issue-%02d", i),
+			Title:     fmt.Sprintf("Issue %d", i),
+			Priority:  2,
+			IssueType: model.TypeTask,
+		})
+	}
+
+	tree := NewTreeModel(testTheme())
+	tree.Build(issues)
+	tree.SetSize(80, 10)
+
+	// Move cursor to 50 and scroll
+	tree.cursor = 50
+	tree.ensureCursorVisible()
+
+	output := tree.View()
+
+	// Should contain updated position indicator
+	// The offset should be adjusted so cursor 50 is visible
+	if !strings.Contains(output, " of 100]") {
+		t.Errorf("position indicator with 'of 100' not found, got:\n%s", output)
+	}
+}
+
+// TestPositionIndicatorNotShownSmallTree verifies no indicator for small trees
+func TestPositionIndicatorNotShownSmallTree(t *testing.T) {
+	issues := []model.Issue{
+		{ID: "issue-1", Title: "Issue 1", Priority: 1, IssueType: model.TypeTask},
+		{ID: "issue-2", Title: "Issue 2", Priority: 2, IssueType: model.TypeTask},
+		{ID: "issue-3", Title: "Issue 3", Priority: 3, IssueType: model.TypeTask},
+	}
+
+	tree := NewTreeModel(testTheme())
+	tree.Build(issues)
+	tree.SetSize(80, 20) // Viewport larger than tree
+
+	output := tree.View()
+
+	// Should NOT contain position indicator (all nodes fit)
+	if strings.Contains(output, " of ") {
+		t.Errorf("position indicator should not show for small tree, got:\n%s", output)
+	}
+}
+
+// TestPositionIndicatorAtEnd verifies indicator at end of list
+func TestPositionIndicatorAtEnd(t *testing.T) {
+	var issues []model.Issue
+	for i := 0; i < 100; i++ {
+		issues = append(issues, model.Issue{
+			ID:        fmt.Sprintf("issue-%02d", i),
+			Title:     fmt.Sprintf("Issue %d", i),
+			Priority:  2,
+			IssueType: model.TypeTask,
+		})
+	}
+
+	tree := NewTreeModel(testTheme())
+	tree.Build(issues)
+	tree.SetSize(80, 10)
+
+	// Jump to bottom
+	tree.JumpToBottom()
+
+	output := tree.View()
+
+	// Should contain "[91-100 of 100]"
+	if !strings.Contains(output, "[91-100 of 100]") {
+		t.Errorf("position indicator at end not found, got:\n%s", output)
+	}
+}

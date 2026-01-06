@@ -439,7 +439,29 @@ func (t *TreeModel) View() string {
 		sb.WriteString("\n")
 	}
 
+	// Add position indicator if scrolling is needed (bv-2nax)
+	// Only shows when there are more nodes than fit in the viewport
+	if len(t.flatList) > t.height && t.height > 0 {
+		indicator := t.renderPositionIndicator(start, end)
+		sb.WriteString(indicator)
+	}
+
 	return sb.String()
+}
+
+// renderPositionIndicator renders the scroll position indicator (bv-2nax).
+// Shows the current visible range in the format "[start-end of total]".
+// Uses 1-indexed numbers for user-friendly display.
+func (t *TreeModel) renderPositionIndicator(start, end int) string {
+	total := len(t.flatList)
+	// Convert to 1-indexed for display
+	displayStart := start + 1
+	displayEnd := end
+
+	indicator := fmt.Sprintf(" [%d-%d of %d]", displayStart, displayEnd, total)
+	return t.theme.Renderer.NewStyle().
+		Foreground(t.theme.Muted).
+		Render(indicator)
 }
 
 // renderEmptyState renders the view when there are no issues.
