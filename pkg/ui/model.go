@@ -1109,6 +1109,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Stats != m.analysis {
 			return m, nil
 		}
+
+		// Mark snapshot as Phase 2 ready for consistency with Phase2UpdateMsg (bv-e3ub)
+		if m.snapshot != nil {
+			m.snapshot.Phase2Ready = true
+		}
+
 		// Phase 2 analysis complete - regenerate insights with full data
 		ins := m.analysis.GenerateInsights(len(m.issues))
 		m.insightsPanel = NewInsightsModel(ins, m.issueMap, m.theme)
