@@ -1179,6 +1179,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyFilter()
 		}
 
+	case Phase2UpdateMsg:
+		// BackgroundWorker notifies that Phase 2 analysis is complete (bv-e3ub)
+		// Verify this update matches the current snapshot using DataHash
+		if m.snapshot == nil || m.snapshot.DataHash != msg.DataHash {
+			// Stale update - ignore
+			return m, nil
+		}
+
+		// Mark snapshot as Phase 2 ready
+		m.snapshot.Phase2Ready = true
+
+		// Note: Phase2ReadyMsg handler (via WaitForPhase2Cmd) already handles
+		// all the UI updates (insights, graph view, alerts, etc.). This message
+		// is a complementary notification from the BackgroundWorker that Phase 2
+		// completed. If Phase2ReadyMsg hasn't fired yet, it will handle the full
+		// UI refresh. If it already fired (race condition), this is a no-op.
+		return m, nil
+
 	case HistoryLoadedMsg:
 		// Background history loading completed
 		m.historyLoading = false

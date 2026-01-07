@@ -412,7 +412,41 @@ func (w *BackgroundWorker) buildSnapshot() *DataSnapshot {
 	log.Printf("buildSnapshot: loaded %d issues (load=%v, analyze=%v, total=%v, hash=%s)",
 		len(issues), loadDuration, analyzeDuration, totalDuration, hashPrefix(hash))
 
+	// Spawn Phase 2 completion watcher if Phase 2 isn't ready yet
+	if snapshot != nil && !snapshot.Phase2Ready {
+		go w.runPhase2Analysis(snapshot.Analysis, hash)
+	}
+
 	return snapshot
+}
+
+// runPhase2Analysis waits for Phase 2 analysis to complete and notifies the UI.
+// This runs in a goroutine so it doesn't block snapshot delivery.
+// The dataHash is used by the UI to verify the update matches the current snapshot.
+func (w *BackgroundWorker) runPhase2Analysis(stats *analysis.GraphStats, dataHash string) {
+	if stats == nil {
+		return
+	}
+
+	// Wait for Phase 2 to complete (blocking)
+	stats.WaitForPhase2()
+
+	// Check if worker was stopped while we were waiting
+	w.mu.RLock()
+	stopped := w.state == WorkerStopped
+	w.mu.RUnlock()
+
+	if stopped {
+		log.Printf("runPhase2Analysis: worker stopped, not sending update")
+		return
+	}
+
+	log.Printf("runPhase2Analysis: Phase 2 complete for hash=%s", hashPrefix(dataHash))
+
+	// Notify UI that Phase 2 metrics are ready
+	if w.program != nil {
+		w.program.Send(Phase2UpdateMsg{DataHash: dataHash})
+	}
 }
 
 // SnapshotReadyMsg is sent to the UI when a new snapshot is ready.
@@ -428,8 +462,9 @@ type SnapshotErrorMsg struct {
 
 // Phase2UpdateMsg is sent when Phase 2 analysis completes.
 // This allows the UI to update without waiting for full rebuild.
+// The UI should check DataHash matches current snapshot before using.
 type Phase2UpdateMsg struct {
-	// Phase 2 metrics are embedded in the GraphStats
+	DataHash string // Content hash to verify this matches current snapshot
 }
 
 // WatcherChanged returns the watcher's change notification channel.

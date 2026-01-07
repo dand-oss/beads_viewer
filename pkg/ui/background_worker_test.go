@@ -653,3 +653,101 @@ func TestBackgroundWorker_ConcurrentTrigger(t *testing.T) {
 		t.Error("Expected snapshot after concurrent triggers")
 	}
 }
+
+func TestBackgroundWorker_Phase2Async(t *testing.T) {
+	// Test that Phase 2 analysis runs asynchronously (bv-e3ub)
+	tmpDir := t.TempDir()
+	beadsPath := filepath.Join(tmpDir, "beads.jsonl")
+
+	// Create a file with some dependencies to make Phase 2 analysis non-trivial
+	content := `{"id":"test-1","title":"Root","status":"open","priority":1,"issue_type":"task"}
+{"id":"test-2","title":"Child","status":"open","priority":2,"issue_type":"task","dependencies":[{"depends_on":"test-1","type":"blocks"}]}
+`
+	if err := os.WriteFile(beadsPath, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	cfg := WorkerConfig{
+		BeadsPath:     beadsPath,
+		DebounceDelay: 50 * time.Millisecond,
+	}
+
+	worker, err := NewBackgroundWorker(cfg)
+	if err != nil {
+		t.Fatalf("NewBackgroundWorker failed: %v", err)
+	}
+	defer worker.Stop()
+
+	// Trigger refresh and wait for snapshot
+	worker.TriggerRefresh()
+	time.Sleep(200 * time.Millisecond)
+
+	snapshot := worker.GetSnapshot()
+	if snapshot == nil {
+		t.Fatal("Expected snapshot after refresh")
+	}
+
+	// Snapshot should exist with analysis
+	if snapshot.Analysis == nil {
+		t.Fatal("Expected Analysis in snapshot")
+	}
+
+	// Wait for Phase 2 to complete using the GraphStats API
+	snapshot.Analysis.WaitForPhase2()
+
+	// After waiting, Phase 2 should be ready
+	if !snapshot.Analysis.IsPhase2Ready() {
+		t.Error("Phase 2 should be ready after WaitForPhase2()")
+	}
+}
+
+func TestBackgroundWorker_Phase2NoSendAfterStop(t *testing.T) {
+	// Test that runPhase2Analysis doesn't send if worker is stopped (bv-e3ub)
+	tmpDir := t.TempDir()
+	beadsPath := filepath.Join(tmpDir, "beads.jsonl")
+
+	content := `{"id":"test-1","title":"Test","status":"open","priority":1,"issue_type":"task"}` + "\n"
+	if err := os.WriteFile(beadsPath, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	cfg := WorkerConfig{
+		BeadsPath:     beadsPath,
+		DebounceDelay: 50 * time.Millisecond,
+	}
+
+	worker, err := NewBackgroundWorker(cfg)
+	if err != nil {
+		t.Fatalf("NewBackgroundWorker failed: %v", err)
+	}
+
+	// Trigger refresh
+	worker.TriggerRefresh()
+
+	// Stop immediately (before Phase 2 can complete)
+	worker.Stop()
+
+	// Worker should be stopped
+	if worker.State() != WorkerStopped {
+		t.Errorf("Expected stopped state, got %v", worker.State())
+	}
+
+	// The test passes if we reach here without panicking
+	// (runPhase2Analysis should gracefully handle stopped worker)
+}
+
+func TestDataSnapshot_GetGraphStats(t *testing.T) {
+	// Test GetGraphStats helper method (bv-e3ub)
+
+	// Test nil snapshot
+	var nilSnapshot *DataSnapshot
+	if nilSnapshot.GetGraphStats() != nil {
+		t.Error("GetGraphStats on nil snapshot should return nil")
+	}
+
+	// Test snapshot with nil Analysis
+	emptySnapshot := &DataSnapshot{}
+	if emptySnapshot.GetGraphStats() != nil {
+		t.Error("GetGraphStats with nil Analysis should return nil")
+	}
+}
