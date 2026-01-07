@@ -541,3 +541,41 @@ func TestBackgroundWorker_SafeCompute(t *testing.T) {
 		t.Error("Worker should still be functional after panic recovery")
 	}
 }
+
+func TestHashPrefix(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "short string (empty hash)",
+			input:    "empty",
+			expected: "empty",
+		},
+		{
+			name:     "exactly 16 chars",
+			input:    "1234567890123456",
+			expected: "1234567890123456",
+		},
+		{
+			name:     "longer than 16 chars",
+			input:    "8b423072ec4730921a2b3c4d5e6f7890",
+			expected: "8b423072ec473092",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := hashPrefix(tt.input)
+			if result != tt.expected {
+				t.Errorf("hashPrefix(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}

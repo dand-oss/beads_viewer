@@ -350,7 +350,7 @@ func (w *BackgroundWorker) buildSnapshot() *DataSnapshot {
 	w.mu.RUnlock()
 
 	if hash == lastHash && lastHash != "" {
-		log.Printf("buildSnapshot: content unchanged (hash=%s), skipping rebuild", hash[:16])
+		log.Printf("buildSnapshot: content unchanged (hash=%s), skipping rebuild", hashPrefix(hash))
 		// Clear any previous error on successful dedup
 		w.recordError(nil)
 		return nil
@@ -396,7 +396,7 @@ func (w *BackgroundWorker) buildSnapshot() *DataSnapshot {
 
 	totalDuration := time.Since(start)
 	log.Printf("buildSnapshot: loaded %d issues (load=%v, analyze=%v, total=%v, hash=%s)",
-		len(issues), loadDuration, analyzeDuration, totalDuration, hash[:16])
+		len(issues), loadDuration, analyzeDuration, totalDuration, hashPrefix(hash))
 
 	return snapshot
 }
@@ -433,6 +433,15 @@ func (w *BackgroundWorker) LastHash() string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.lastHash
+}
+
+// hashPrefix returns a safe prefix of the hash for logging.
+// Returns up to 16 characters, or the full hash if shorter.
+func hashPrefix(hash string) string {
+	if len(hash) > 16 {
+		return hash[:16]
+	}
+	return hash
 }
 
 // ResetHash clears the stored content hash, forcing the next buildSnapshot
