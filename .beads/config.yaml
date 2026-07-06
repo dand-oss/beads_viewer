@@ -54,3 +54,8 @@
 # - github.org
 # - github.repo
 # - sync.branch - Git branch for beads commits (use BEADS_SYNC_BRANCH env var or bd config set)
+
+# shared systemd server on 3308; never auto-spawn a local server (see wg-rpg38)
+dolt:
+  shared-server: true
+  auto-start: false
